@@ -61,18 +61,22 @@ void callback(char* topic, byte* payload, unsigned int length) {
 
 void reconnect() {
   while (!client.connected()) {
-    if (client.connect("ESP32Client")) {
+    String statusTopic = "hesta/nodes/" + nodeId + "/status";
+    // Connect with Last Will and Testament (LWT) set to OFFLINE
+    if (client.connect("ESP32Client", statusTopic.c_str(), 1, true, "{\"status\":\"OFFLINE\"}")) {
       String commandTopic = "hesta/nodes/" + nodeId + "/devices/+/command";
       client.subscribe(commandTopic.c_str());
       
-      // Heartbeat Online
-      String statusTopic = "hesta/nodes/" + nodeId + "/status";
+      // Heartbeat Online immediately after connecting
       client.publish(statusTopic.c_str(), "{\"status\":\"ONLINE\"}", true);
     } else {
       delay(5000);
     }
   }
 }
+
+unsigned long lastHeartbeat = 0;
+const long HEARTBEAT_INTERVAL = 30000; // 30 seconds
 
 void setup() {
   pinMode(RELAY_PIN, OUTPUT);
@@ -87,5 +91,11 @@ void loop() {
   }
   client.loop();
   
-  // Optional: Send heartbeat every X seconds
+  // Heartbeat every 30 seconds
+  unsigned long currentMillis = millis();
+  if (currentMillis - lastHeartbeat >= HEARTBEAT_INTERVAL) {
+    lastHeartbeat = currentMillis;
+    String statusTopic = "hesta/nodes/" + nodeId + "/status";
+    client.publish(statusTopic.c_str(), "{\"status\":\"ONLINE\"}", true);
+  }
 }
