@@ -122,15 +122,26 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="ESP32 Mock MQTT Simulator")
     parser.add_argument("--mode", choices=["NORMAL", "TIMEOUT", "ERROR", "OFFLINE"], default="NORMAL",
                         help="Simulation mode for testing failure scenarios")
+    parser.add_argument("--node-id", default="node_01", help="Node ID for Heartbeat and LWT")
     args = parser.parse_args()
 
     client = mqtt.Client(userdata={"mode": args.mode})
     client.on_connect = on_connect
     client.on_message = on_message
+    
+    # Last Will and Testament (LWT)
+    status_topic = f"hesta/nodes/{args.node_id}/status"
+    client.will_set(status_topic, json.dumps({"status": "OFFLINE"}), qos=1, retain=True)
 
     try:
         client.connect(BROKER, PORT, 60)
-        client.loop_forever()
+        client.loop_start()
+        
+        while True:
+            # Publish Heartbeat ONLINE every 30 seconds
+            client.publish(status_topic, json.dumps({"status": "ONLINE"}), qos=1, retain=True)
+            time.sleep(30)
+            
     except ConnectionRefusedError:
         print(f"Error: Connection refused. Is Mosquitto running at {BROKER}:{PORT}?")
         sys.exit(1)
