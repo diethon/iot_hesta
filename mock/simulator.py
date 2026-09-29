@@ -104,6 +104,21 @@ def on_message(client, userdata, msg):
         current_state["power"] = "ON"
         if "brightness" in parameters:
             current_state["brightness"] = parameters["brightness"]
+    elif action == "SET_COLOR":
+        current_state["power"] = "ON"
+        if "color" not in current_state:
+            current_state["color"] = {"r": 255, "g": 255, "b": 255}
+        
+        # Update R, G, B individually if provided
+        if "r" in parameters:
+            current_state["color"]["r"] = parameters["r"]
+        if "g" in parameters:
+            current_state["color"]["g"] = parameters["g"]
+        if "b" in parameters:
+            current_state["color"]["b"] = parameters["b"]
+            
+        if "brightness" in parameters:
+            current_state["brightness"] = parameters["brightness"]
             
     device_states[device_id] = current_state
     
@@ -136,6 +151,17 @@ if __name__ == "__main__":
     try:
         client.connect(BROKER, PORT, 60)
         client.loop_start()
+
+        # Publish Catalog on boot
+        catalog_topic = f"hesta/nodes/{args.node_id}/catalog"
+        catalog_payload = [
+            {"type": "LIGHT", "label": "Relay Light (Port 1)", "capabilities": ["POWER"]},
+            {"type": "LED_RGB", "label": "RGB LED Strip (Port 2)", "capabilities": ["POWER", "COLOR", "BRIGHTNESS"]},
+            {"type": "TEMP_SENSOR", "label": "DHT11 Temp (Port 3)", "capabilities": []}
+        ]
+        client.publish(catalog_topic, json.dumps(catalog_payload), qos=1, retain=True)
+        print(f"Published Catalog to {catalog_topic}")
+
         
         while True:
             # Publish Heartbeat ONLINE every 30 seconds
