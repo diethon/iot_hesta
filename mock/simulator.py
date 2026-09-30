@@ -155,9 +155,9 @@ if __name__ == "__main__":
         # Publish Catalog on boot
         catalog_topic = f"hesta/nodes/{args.node_id}/catalog"
         catalog_payload = [
-            {"type": "LIGHT", "label": "Relay Light (Port 1)", "capabilities": ["POWER"]},
-            {"type": "LED_RGB", "label": "RGB LED Strip (Port 2)", "capabilities": ["POWER", "COLOR", "BRIGHTNESS"]},
-            {"type": "TEMP_SENSOR", "label": "DHT11 Temp (Port 3)", "capabilities": []}
+            {"type": "LIGHT", "label": "Relay Light (Port 1)", "capabilities": {"POWER": ["TURN_ON", "TURN_OFF", "TOGGLE"]}},
+            {"type": "LED_RGB", "label": "RGB LED Strip (Port 2)", "capabilities": {"POWER": ["TURN_ON", "TURN_OFF", "TOGGLE"], "COLOR": ["SET_COLOR"], "BRIGHTNESS": ["SET_BRIGHTNESS"]}},
+            {"type": "TEMP_SENSOR", "label": "DHT11 Temp (Port 3)", "capabilities": {"TEMPERATURE_READ": [], "HUMIDITY_READ": []}}
         ]
         client.publish(catalog_topic, json.dumps(catalog_payload), qos=1, retain=True)
         print(f"Published Catalog to {catalog_topic}")

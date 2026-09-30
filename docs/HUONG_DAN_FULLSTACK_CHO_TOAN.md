@@ -20,14 +20,14 @@
 
 | Loại thiết bị (type) | Năng lực (capabilities) | Các Lệnh sẽ nhận (action) | Giải thích |
 |---|---|---|---|
-| `LIGHT` | `["POWER"]` | `TURN_ON`, `TURN_OFF`, `TOGGLE` | Đèn Relay |
-| `LED_RGB` | `["POWER", "COLOR", "BRIGHTNESS"]` | `TURN_ON`, `TURN_OFF`, `TOGGLE`, `SET_COLOR` | Đèn dây đổi màu RGB |
-| `SMART_PLUG` | `["POWER"]` | `TURN_ON`, `TURN_OFF`, `TOGGLE` | Ổ cắm thông minh |
-| `TEMP_HUMID_SENSOR` | `["TEMPERATURE_READ", "HUMIDITY_READ"]` | (Chỉ báo cáo State lên) | Cảm biến Nhiệt Ẩm DHT22 |
-| `MOTION_SENSOR` | `["MOTION_DETECT"]` | (Chỉ báo cáo State lên) | Cảm biến chuyển động PIR |
-| `SMOKE_SENSOR` | `["SMOKE_DETECT"]` | (Chỉ báo cáo State lên) | Cảm biến Khói MQ-2 |
-| `IR_REMOTE` | `["IR_TRANSMIT"]` | `SEND_IR_CODE` | Cục phát hồng ngoại IR |
-| `CAMERA_AI` | `["AI_FALL_DETECT", "AI_INTRUSION_DETECT"]` | `SET_AI_MODE` | Camera giám sát Edge AI |
+| `LIGHT` | `{"POWER": ["TURN_ON", "TURN_OFF", "TOGGLE"]}` | `TURN_ON`, `TURN_OFF`, `TOGGLE` | Đèn Relay |
+| `LED_RGB` | `{"POWER": ["TURN_ON", "TURN_OFF", "TOGGLE"], "COLOR": ["SET_COLOR"], "BRIGHTNESS": ["SET_BRIGHTNESS"]}` | `TURN_ON`, `TURN_OFF`, `TOGGLE`, `SET_COLOR`, `SET_BRIGHTNESS` | Đèn dây đổi màu RGB |
+| `SMART_PLUG` | `{"POWER": ["TURN_ON", "TURN_OFF", "TOGGLE"]}` | `TURN_ON`, `TURN_OFF`, `TOGGLE` | Ổ cắm thông minh |
+| `TEMP_HUMID_SENSOR` | `{"TEMPERATURE_READ": [], "HUMIDITY_READ": []}` | (Chỉ báo cáo State lên) | Cảm biến Nhiệt Ẩm DHT22 |
+| `MOTION_SENSOR` | `{"MOTION_DETECT": []}` | (Chỉ báo cáo State lên) | Cảm biến chuyển động PIR |
+| `SMOKE_SENSOR` | `{"SMOKE_DETECT": []}` | (Chỉ báo cáo State lên) | Cảm biến Khói MQ-2 |
+| `IR_REMOTE` | `{"IR_TRANSMIT": ["SEND_IR_CODE"]}` | `SEND_IR_CODE` | Cục phát hồng ngoại IR |
+| `CAMERA_AI` | `{"AI_FALL_DETECT": ["SET_AI_MODE"], "AI_INTRUSION_DETECT": ["SET_AI_MODE"]}` | `SET_AI_MODE` | Camera giám sát Edge AI |
 
 > 🚨 **CẢNH BÁO CỰC KỲ QUAN TRỌNG VỀ TÊN LOẠI CẢM BIẾN (TYPE):**
 > Trong bảng từ vựng ở trên, Toàn **BẮT BUỘC** phải gõ chính xác các chữ `TEMP_HUMID_SENSOR`, `MOTION_SENSOR`, `SMOKE_SENSOR` vào trường `type` của JSON Catalog.
@@ -47,30 +47,30 @@
 ### 📌 VÍ DỤ CHI TIẾT TỪNG THIẾT BỊ ĐỂ TOÀN XỬ LÝ (PARSE JSON):
 
 #### 1. Đèn Relay (LIGHT) & Ổ cắm thông minh (SMART_PLUG)
-- ESP32 khai báo Capability: `["POWER"]`
+- ESP32 khai báo Capability: `{"POWER": ["TURN_ON", "TURN_OFF", "TOGGLE"]}`
 - Khi User bấm nút bật: ESP32 nhận lệnh `{"action": "TURN_ON", "parameters": {}}`
 - Khi User bấm nút tắt: ESP32 nhận lệnh `{"action": "TURN_OFF", "parameters": {}}`
 
 #### 2. Đèn dải đổi màu (LED_RGB)
-- ESP32 khai báo Capability: `["POWER", "COLOR", "BRIGHTNESS"]`
+- ESP32 khai báo Capability: `{"POWER": ["TURN_ON", "TURN_OFF", "TOGGLE"], "COLOR": ["SET_COLOR"], "BRIGHTNESS": ["SET_BRIGHTNESS"]}`
 - Bật/Tắt: ESP32 nhận lệnh `{"action": "TURN_ON", "parameters": {}}`
 - Đổi màu đỏ: ESP32 nhận lệnh `{"action": "SET_COLOR", "parameters": {"r": 255, "g": 0, "b": 0}}`
 - Giảm sáng 50%: ESP32 nhận lệnh `{"action": "SET_BRIGHTNESS", "parameters": {"level": 50}}` *(Mạch tự giảm cường độ PWM của 3 bóng LED mà không đổi màu)*.
 
 #### 3. Cục phát tia Hồng ngoại (IR_REMOTE)
-- ESP32 khai báo Capability: `["IR_TRANSMIT"]`
+- ESP32 khai báo Capability: `{"IR_TRANSMIT": ["SEND_IR_CODE"]}`
 - Khi User bấm "Bật Máy Lạnh" trên Web, ESP32 nhận lệnh: 
   `{"action": "SEND_IR_CODE", "parameters": {"protocol": "NEC", "code": "0x00FF00FF"}}`
   *(Mạch ESP32 đọc chữ NEC và cái mã HEX để cấp xung điện cho chân Transistor 2N2222 nhấp nháy IR)*.
 
 #### 4. Cảm biến Nhiệt/Ẩm (TEMP_HUMID_SENSOR)
-- Khai báo Capability: `["TEMPERATURE_READ", "HUMIDITY_READ"]`
+- Khai báo Capability: `{"TEMPERATURE_READ": [], "HUMIDITY_READ": []}`
 - **Lưu ý:** Loại này Web KHÔNG bao giờ gửi Lệnh (Action) xuống. 
 - ESP32 chỉ tự động gửi STATE lên Web mỗi 10 giây:
   `{"state": {"temperature": 27.5, "humidity": 80.2}}`
 
 #### 5. Cảm biến Chuyển động (MOTION_SENSOR) & Khói (SMOKE_SENSOR)
-- Khai báo Capability: `["MOTION_DETECT"]` hoặc `["SMOKE_DETECT"]`
+- Khai báo Capability: `{"MOTION_DETECT": []}` hoặc `{"SMOKE_DETECT": []}`
 - Tương tự như DHT22, mạch chỉ bắn STATE lên khi có người đi qua hoặc có khói:
   - Cảm biến PIR: `{"state": {"motion": true}}`
   - Cảm biến Khói: `{"state": {"smoke": true}}`
@@ -126,53 +126,68 @@ void publishCatalog() {
     JsonObject light = arr.createNestedObject();
     light["type"] = "LIGHT";
     light["label"] = "Đèn Relay (Cấu hình bằng Pin)";
-    JsonArray lightCaps = light.createNestedArray("capabilities");
-    lightCaps.add("POWER");
+    JsonObject lightCaps = light.createNestedObject("capabilities");
+    JsonArray lightPower = lightCaps.createNestedArray("POWER");
+    lightPower.add("TURN_ON");
+    lightPower.add("TURN_OFF");
+    lightPower.add("TOGGLE");
 
     // 2. Khai báo hỗ trợ Đèn LED RGB
     JsonObject rgb = arr.createNestedObject();
     rgb["type"] = "LED_RGB";
     rgb["label"] = "Đèn dây LED RGB";
-    JsonArray rgbCaps = rgb.createNestedArray("capabilities");
-    rgbCaps.add("POWER");
-    rgbCaps.add("COLOR");
-    rgbCaps.add("BRIGHTNESS");
+    JsonObject rgbCaps = rgb.createNestedObject("capabilities");
+    
+    JsonArray rgbPower = rgbCaps.createNestedArray("POWER");
+    rgbPower.add("TURN_ON");
+    rgbPower.add("TURN_OFF");
+    rgbPower.add("TOGGLE");
+    
+    JsonArray rgbColor = rgbCaps.createNestedArray("COLOR");
+    rgbColor.add("SET_COLOR");
+    
+    JsonArray rgbBright = rgbCaps.createNestedArray("BRIGHTNESS");
+    rgbBright.add("SET_BRIGHTNESS");
 
     // 3. Khai báo hỗ trợ Ổ cắm thông minh
     JsonObject plug = arr.createNestedObject();
     plug["type"] = "SMART_PLUG";
     plug["label"] = "Ổ cắm thông minh";
-    JsonArray plugCaps = plug.createNestedArray("capabilities");
-    plugCaps.add("POWER");
+    JsonObject plugCaps = plug.createNestedObject("capabilities");
+    JsonArray plugPower = plugCaps.createNestedArray("POWER");
+    plugPower.add("TURN_ON");
+    plugPower.add("TURN_OFF");
+    plugPower.add("TOGGLE");
 
     // 4. Khai báo hỗ trợ Cảm biến nhiệt độ
     JsonObject dht = arr.createNestedObject();
     dht["type"] = "TEMP_HUMID_SENSOR";
     dht["label"] = "Cảm biến Nhiệt/Ẩm DHT22";
-    JsonArray dhtCaps = dht.createNestedArray("capabilities");
-    dhtCaps.add("TEMPERATURE_READ");
-    dhtCaps.add("HUMIDITY_READ");
+    JsonObject dhtCaps = dht.createNestedObject("capabilities");
+    dhtCaps.createNestedArray("TEMPERATURE_READ");
+    dhtCaps.createNestedArray("HUMIDITY_READ");
 
     // 5. Khai báo hỗ trợ Cảm biến chuyển động
     JsonObject pir = arr.createNestedObject();
     pir["type"] = "MOTION_SENSOR";
     pir["label"] = "Cảm biến Chuyển động PIR";
-    JsonArray pirCaps = pir.createNestedArray("capabilities");
-    pirCaps.add("MOTION_DETECT");
+    JsonObject pirCaps = pir.createNestedObject("capabilities");
+    pirCaps.createNestedArray("MOTION_DETECT");
 
     // 6. Khai báo hỗ trợ Cảm biến khói
     JsonObject mq2 = arr.createNestedObject();
     mq2["type"] = "SMOKE_SENSOR";
     mq2["label"] = "Cảm biến Khói MQ-2";
-    JsonArray mq2Caps = mq2.createNestedArray("capabilities");
-    mq2Caps.add("SMOKE_DETECT");
+    JsonObject mq2Caps = mq2.createNestedObject("capabilities");
+    mq2Caps.createNestedArray("SMOKE_DETECT");
 
     // 7. Khai báo hỗ trợ Cục phát hồng ngoại
     JsonObject ir = arr.createNestedObject();
     ir["type"] = "IR_REMOTE";
     ir["label"] = "Cục phát hồng ngoại IR";
-    JsonArray irCaps = ir.createNestedArray("capabilities");
-    irCaps.add("IR_TRANSMIT");
+    JsonObject irCaps = ir.createNestedObject("capabilities");
+    JsonArray irTrans = irCaps.createNestedArray("IR_TRANSMIT");
+    irTrans.add("SEND_IR_CODE");
     String payload;
     serializeJson(doc, payload);
     mqttClient.publish(catalogTopic.c_str(), payload.c_str(), true); 
@@ -500,12 +515,12 @@ public DeviceResponse createDevice(UUID userId, DeviceCreateRequest request) {
             .orElseThrow(() -> new RuntimeException("Room not found"));
 
     // 3. Tìm năng lực (Capabilities) từ Catalog
-    com.fasterxml.jackson.databind.JsonNode catalog = node.getSupportedTypes();
-    com.fasterxml.jackson.databind.JsonNode capabilities = null;
-    if (catalog != null && catalog.isArray()) {
-        for (com.fasterxml.jackson.databind.JsonNode typeObj : catalog) {
-            if (typeObj.has("type") && typeObj.get("type").asText().equals(request.getDeviceType())) {
-                capabilities = typeObj.get("capabilities");
+    java.util.List<java.util.Map<String, Object>> catalog = node.getSupportedTypes();
+    java.util.Map<String, java.util.List<String>> capabilities = null;
+    if (catalog != null) {
+        for (java.util.Map<String, Object> typeObj : catalog) {
+            if (request.getDeviceType().equals(typeObj.get("type"))) {
+                capabilities = (java.util.Map<String, java.util.List<String>>) typeObj.get("capabilities");
                 break;
             }
         }
@@ -648,11 +663,11 @@ Như vậy là luồng đi dọc hệ thống (Vertical Slicing) của Toàn đ�
 
 ## PHẦN IV: CÔNG CỤ TEST ĐỘC LẬP (MOCK TEST) - DÀNH RIÊNG CHO TEAM IoT
 
-Trong thời gian chờ Team Web/App hoàn thiện giao diện (FE) và Backend (BE), Toàn có thể tự test và nghiệm thu 100% code C++ của mình bằng 2 file Python giả lập mà Kiến trúc sư đã chuẩn bị sẵn trong thư mục `iot_hesta/mock/`.
+Trong thời gian chờ Team Web/App hoàn thiện giao diện (FE) và Backend (BE), Toàn có thể tự test và nghiệm thu 100% code C++ của mình bằng 2 file Python giả lập mà Kiến trúc sư đã chuẩn bị sẵn trong thư mục `iot_hesta/test/`.
 
 ### 1. Chuẩn bị môi trường
 - Đảm bảo Toàn đã cài Python trên máy tính.
-- Mở Terminal/CMD, cd vào thư mục `iot_hesta/mock/` và cài thư viện MQTT:
+- Mở Terminal/CMD, cd vào thư mục `iot_hesta/test/` và cài thư viện MQTT:
   ```bash
   pip install -r requirements.txt
   ```
