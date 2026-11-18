@@ -2,6 +2,9 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <PubSubClient.h>
+#include <HTTPClient.h>
+#include <Update.h>
+#include <mbedtls/md.h>
 
 // ============================================================
 // ESP32-CAM AI-THINKER
@@ -50,6 +53,15 @@ const int MQTT_PORT = 1883;
 // ============================================================
 
 const char* NODE_ID = "8d1cdd82-b339-469e-be13-7e91070f7ae5";
+const char* DEVICE_TYPE = "GATE";
+const char* FIRMWARE_VERSION = "v1.0.0";
+
+const char* MQTT_NODE_PING_TOPIC     = "hesta/nodes/8d1cdd82-b339-469e-be13-7e91070f7ae5/ping";
+const char* MQTT_NODE_PONG_TOPIC     = "hesta/nodes/8d1cdd82-b339-469e-be13-7e91070f7ae5/pong";
+const char* MQTT_NODE_REGISTER_TOPIC = "hesta/nodes/8d1cdd82-b339-469e-be13-7e91070f7ae5/register";
+const char* MQTT_NODE_OTA_NOTIFY     = "hesta/nodes/8d1cdd82-b339-469e-be13-7e91070f7ae5/ota/notify";
+const char* MQTT_NODE_OTA_ABORT      = "hesta/nodes/8d1cdd82-b339-469e-be13-7e91070f7ae5/ota/abort";
+const char* MQTT_NODE_OTA_STATUS     = "hesta/nodes/8d1cdd82-b339-469e-be13-7e91070f7ae5/ota/status";
 
 
 // ============================================================
@@ -733,6 +745,133 @@ void printGateStatus() {
 
 
 // ============================================================
+// DIAGNOSTICS PING/PONG & SAFE HTTP OTA FIRMWARE HANDLER
+// ============================================================
+
+String gateAbortedCampaignId = "";
+
+String extractJsonStringField(const String& json, const String& key) {
+  String pattern = "\"" + key + "\"";
+  int keyIdx = json.indexOf(pattern);
+  if (keyIdx < 0) return "";
+  int colonIdx = json.indexOf(':', keyIdx + pattern.length());
+  if (colonIdx < 0) return "";
+  int startQuote = json.indexOf('"', colonIdx + 1);
+  if (startQuote < 0) return "";
+  int endQuote = json.indexOf('"', startQuote + 1);
+  if (endQuote < 0) return "";
+  return json.substring(startQuote + 1, endQuote);
+}
+
+void publishGateNodeRegister() {
+  String payload = "{\"nodeId\":\"" + String(NODE_ID) +
+                   "\",\"nodeCode\":\"" + String(NODE_ID) +
+                   "\",\"deviceType\":\"" + String(DEVICE_TYPE) +
+                   "\",\"firmwareVersion\":\"" + String(FIRMWARE_VERSION) + "\"}";
+  mqttClient.publish(MQTT_NODE_REGISTER_TOPIC, payload.c_str(), true);
+}
+
+void publishGateOtaStatus(const String& campaignId, const String& version, const String& status, const String& err) {
+  String payload = "{\"campaignId\":\"" + campaignId +
+                   "\",\"nodeCode\":\"" + String(NODE_ID) +
+                   "\",\"version\":\"" + version +
+                   "\",\"status\":\"" + status +
+                   "\",\"error\":\"" + err + "\"}";
+  mqttClient.publish(MQTT_NODE_OTA_STATUS, payload.c_str(), false);
+  mqttClient.loop();
+}
+
+void performGateHttpOta(const String& campaignId, const String& version, const String& fileUrl, const String& expectedSha) {
+  if (gateAbortedCampaignId == campaignId) {
+    publishGateOtaStatus(campaignId, version, "FAILED", "Aborted before start");
+    return;
+  }
+
+  // Ensure sliding gate motor is stopped before firmware flash/reboot
+  motorStop();
+  publishGateOtaStatus(campaignId, version, "DOWNLOADING", "");
+
+  HTTPClient http;
+  WiFiClient downloadClient;
+  http.setTimeout(20000);
+  if (!http.begin(downloadClient, fileUrl)) {
+    publishGateOtaStatus(campaignId, version, "FAILED", "Invalid firmware URL");
+    return;
+  }
+
+  int code = http.GET();
+  int contentLen = http.getSize();
+  if (code != HTTP_CODE_OK || contentLen <= 0 || !Update.begin((size_t)contentLen)) {
+    publishGateOtaStatus(campaignId, version, "FAILED", "HTTP/Update init error: " + String(code));
+    http.end();
+    return;
+  }
+
+  mbedtls_md_context_t shaCtx;
+  mbedtls_md_init(&shaCtx);
+  mbedtls_md_setup(&shaCtx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
+  mbedtls_md_starts(&shaCtx);
+
+  WiFiClient* stream = http.getStreamPtr();
+  uint8_t buf[1024];
+  size_t written = 0;
+
+  while (http.connected() && written < (size_t)contentLen) {
+    mqttClient.loop();
+    if (gateAbortedCampaignId == campaignId) {
+      Update.abort();
+      mbedtls_md_free(&shaCtx);
+      http.end();
+      publishGateOtaStatus(campaignId, version, "FAILED", "Aborted by Admin");
+      return;
+    }
+    size_t avail = stream->available();
+    if (avail > 0) {
+      int rd = stream->readBytes(buf, avail > sizeof(buf) ? sizeof(buf) : avail);
+      if (rd > 0) {
+        mbedtls_md_update(&shaCtx, buf, rd);
+        if (Update.write(buf, rd) != (size_t)rd) {
+          Update.abort();
+          mbedtls_md_free(&shaCtx);
+          http.end();
+          publishGateOtaStatus(campaignId, version, "FAILED", "Flash write error");
+          return;
+        }
+        written += rd;
+      }
+    } else {
+      delay(5);
+    }
+  }
+
+  publishGateOtaStatus(campaignId, version, "VERIFYING", "");
+  uint8_t digest[32];
+  mbedtls_md_finish(&shaCtx, digest);
+  mbedtls_md_free(&shaCtx);
+  http.end();
+
+  char hex[65];
+  for (int i = 0; i < 32; i++) sprintf(&hex[i * 2], "%02x", digest[i]);
+  hex[64] = '\0';
+
+  if (expectedSha.length() == 64 && !expectedSha.equalsIgnoreCase(String(hex))) {
+    Update.abort();
+    publishGateOtaStatus(campaignId, version, "FAILED", "SHA-256 mismatch");
+    return;
+  }
+
+  if (!Update.end(true)) {
+    publishGateOtaStatus(campaignId, version, "FAILED", "Update.end failed");
+    return;
+  }
+
+  publishGateOtaStatus(campaignId, version, "REBOOTING", "");
+  publishGateOtaStatus(campaignId, version, "SUCCESS", "");
+  delay(500);
+  ESP.restart();
+}
+
+// ============================================================
 // MQTT CALLBACK
 // ============================================================
 
@@ -785,6 +924,30 @@ void mqttCallback(
   );
 
   Serial.println(message);
+
+  String topicStr(topic);
+  if (topicStr == MQTT_NODE_PING_TOPIC) {
+    String pingId = extractJsonStringField(message, "pingId");
+    String pong = "{\"pingId\":\"" + pingId + "\",\"nodeCode\":\"" + String(NODE_ID) + "\",\"firmwareVersion\":\"" + String(FIRMWARE_VERSION) + "\"}";
+    mqttClient.publish(MQTT_NODE_PONG_TOPIC, pong.c_str(), false);
+    return;
+  }
+
+  if (topicStr == MQTT_NODE_OTA_ABORT) {
+    gateAbortedCampaignId = extractJsonStringField(message, "campaignId");
+    return;
+  }
+
+  if (topicStr == MQTT_NODE_OTA_NOTIFY) {
+    String campaignId = extractJsonStringField(message, "campaignId");
+    String version = extractJsonStringField(message, "version");
+    String fileUrl = extractJsonStringField(message, "fileUrl");
+    String sha = extractJsonStringField(message, "checksumSha256");
+    if (fileUrl.length() > 0) {
+      performGateHttpOta(campaignId, version, fileUrl, sha);
+    }
+    return;
+  }
 
 
   // ==========================================================
@@ -961,6 +1124,10 @@ bool connectMQTT() {
       mqttClient.subscribe(
         MQTT_COMMAND_TOPIC
       );
+    mqttClient.subscribe(MQTT_NODE_PING_TOPIC);
+    mqttClient.subscribe(MQTT_NODE_OTA_NOTIFY);
+    mqttClient.subscribe(MQTT_NODE_OTA_ABORT);
+    publishGateNodeRegister();
 
 
     if (subscribed) {
@@ -1303,6 +1470,7 @@ void setup() {
   mqttClient.setCallback(
     mqttCallback
   );
+  mqttClient.setBufferSize(1024);
 
 
   // ==========================================================
