@@ -20,9 +20,10 @@
 // ==========================================
 // CẤU HÌNH WIFI & MQTT (Tùy chỉnh theo mạng nhà)
 // ==========================================
-const char* ssid        = "HESTA_SmartHome_2.4G";
-const char* password    = "Hesta@2026";
-const char* mqtt_server = "192.168.1.100"; // IP của Orange Pi 5 Plus
+// ⚠️ CẤU HÌNH WIFI: Thay đổi SSID và mật khẩu phù hợp mạng nhà bạn trước khi nạp
+const char* ssid        = "YOUR_WIFI_SSID";       // TODO: Đổi thành SSID WiFi nhà bạn
+const char* password    = "YOUR_WIFI_PASSWORD";    // TODO: Đổi thành mật khẩu WiFi nhà bạn
+const char* mqtt_server = "192.168.1.100";         // IP của Orange Pi 5 Plus
 const int   mqtt_port   = 1883;
 const char* client_id   = "hesta_esp32_alarm_node_01";
 
@@ -104,6 +105,9 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
     int durationSec = doc["durationSec"] | 60;
 
     if (strcmp(command, "START") == 0 || strcmp(command, "CRITICAL_SOS") == 0) {
+      triggerSiren(true, durationSec * 1000UL);
+    } else if (strcmp(command, "PRE_ALARM") == 0 || strcmp(command, "FULL_SIREN") == 0) {
+      // Tương thích ngược với lệnh từ AI Edge (PRE_ALARM) và Java Backend (FULL_SIREN)
       triggerSiren(true, durationSec * 1000UL);
     } else if (strcmp(command, "STOP") == 0) {
       triggerSiren(false);
