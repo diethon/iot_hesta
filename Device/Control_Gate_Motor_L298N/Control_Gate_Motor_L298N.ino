@@ -29,8 +29,8 @@
 // WIFI CONFIGURATION
 // ============================================================
 
-const char* WIFI_SSID     = "Dung Home T3";
-const char* WIFI_PASSWORD = "123lyvanphuc";
+const char* WIFI_SSID     = "Sieusao";
+const char* WIFI_PASSWORD = "12345678";
 
 
 // ============================================================
@@ -40,7 +40,7 @@ const char* WIFI_PASSWORD = "123lyvanphuc";
 // IP máy chạy Mosquitto
 // Ví dụ máy Windows của bạn:
 // 192.168.88.104
-const char* MQTT_SERVER = "192.168.88.104";
+const char* MQTT_SERVER = "192.168.137.1";
 
 const int MQTT_PORT = 1883;
 
@@ -802,9 +802,10 @@ void mqttCallback(
     // --------------------------------------------------------
 
     if (
-      message.indexOf(
-        "\"action\":\"OPEN\""
-      ) >= 0
+      message.indexOf("\"action\":\"OPEN\"") >= 0 ||
+      message.indexOf("\"action\":\"POWER_OFF\"") >= 0 ||
+      message.indexOf("\"action\":\"UNLOCK\"") >= 0 ||
+      message == "OPEN"
     ) {
 
       Serial.println(
@@ -820,9 +821,10 @@ void mqttCallback(
     // --------------------------------------------------------
 
     else if (
-      message.indexOf(
-        "\"action\":\"CLOSE\""
-      ) >= 0
+      message.indexOf("\"action\":\"CLOSE\"") >= 0 ||
+      message.indexOf("\"action\":\"POWER_ON\"") >= 0 ||
+      message.indexOf("\"action\":\"LOCK\"") >= 0 ||
+      message == "CLOSE"
     ) {
 
       Serial.println(
@@ -838,50 +840,13 @@ void mqttCallback(
     // --------------------------------------------------------
 
     else if (
-      message.indexOf(
-        "\"action\":\"STOP\""
-      ) >= 0
+      message.indexOf("\"action\":\"STOP\"") >= 0 ||
+      message == "STOP"
     ) {
 
       Serial.println(
         "MQTT COMMAND = STOP"
       );
-
-      motorStop();
-    }
-
-
-    // --------------------------------------------------------
-    // OPEN plain text
-    // --------------------------------------------------------
-
-    else if (
-      message == "OPEN"
-    ) {
-
-      motorOpen();
-    }
-
-
-    // --------------------------------------------------------
-    // CLOSE plain text
-    // --------------------------------------------------------
-
-    else if (
-      message == "CLOSE"
-    ) {
-
-      motorClose();
-    }
-
-
-    // --------------------------------------------------------
-    // STOP plain text
-    // --------------------------------------------------------
-
-    else if (
-      message == "STOP"
-    ) {
 
       motorStop();
     }

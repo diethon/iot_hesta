@@ -1,6 +1,5 @@
 # Hesta Smart Home - IoT Firmware & Hardware Control
 
-> **Đồ án Tốt nghiệp Kỹ sư Kỹ thuật Phần mềm (SEP490) - Đại học FPT**  
 > **Repository:** [iot_hesta](https://github.com/diethon/iot_hesta.git)
 
 ---
@@ -69,7 +68,7 @@ graph TD
 │   │   └── led.py                     # Cầu nối Python: MQTT Client sang BLE LED Strip
 │   │
 │   └── Servo/                         # Động cơ Servo
-│       └── Test_Servo.ino             # Điều khiển Servo MG996R theo góc quay PWM
+│       └── Servo.ino                  # Điều khiển Servo MG996R theo góc quay PWM
 │
 └── Sensor/                            # Phân hệ cảm biến và thu thập dữ liệu
     ├── BLE_Sensor_MQTT/               # Node cảm biến trung tâm: DHT22, LDR, PIR + BLE + mDNS
