@@ -89,3 +89,7 @@ Thumbs.db
 !*.template.env
 secrets.h
 credentials.h
+__pycache__/
+*.pyc
+.DS_Store
+
