@@ -35,6 +35,9 @@ import os
 import json
 import time
 import random
+import hashlib
+import urllib.request
+import urllib.error
 import threading
 import argparse
 from datetime import datetime
@@ -124,6 +127,20 @@ class HardwareSimulator:
             "motion": 0,
         }
 
+        # OTA & Firmware states per node
+        self.node_firmware_versions = {
+            AC_NODE_ID: "v1.0.0",
+            GATE_NODE_ID: "v1.0.0",
+            SENSOR_NODE_ID: "v1.0.0",
+        }
+        self.node_device_types = {
+            AC_NODE_ID: "AIR_CONDITIONER",
+            GATE_NODE_ID: "GATE",
+            SENSOR_NODE_ID: "SENSOR",
+        }
+        self.aborted_campaigns = set()
+        self.ota_lock = threading.Lock()
+
         # Initialize MQTT Client
         client_id = f"hesta-hardware-sim-{random.randint(1000, 9999)}"
         # Support paho-mqtt v1 & v2 API
@@ -166,18 +183,26 @@ class HardwareSimulator:
         if rc_code == 0:
             print(f"{C_GREEN}[✓ MQTT CONNECTED]{C_RESET} Đã kết nối thành công tới broker ({self.broker}:{self.port})")
 
-            # 1. Subscribe to command topics for AC, Gate, and all Smart Lights / LEDs
+            # 1. Subscribe to command topics, Diagnostics Ping, and OTA topics
             client.subscribe(AC_COMMAND_TOPIC, qos=1)
             client.subscribe(f"hesta/nodes/{AC_NODE_ID}/devices/+/command", qos=1)
             client.subscribe(GATE_COMMAND_TOPIC, qos=1)
             client.subscribe(f"hesta/nodes/{GATE_NODE_ID}/devices/+/command", qos=1)
             client.subscribe("hesta/nodes/+/devices/+/command", qos=1)
+            for sim_node in self.node_firmware_versions:
+                client.subscribe(f"hesta/nodes/{sim_node}/ping", qos=1)
+                client.subscribe(f"hesta/nodes/{sim_node}/ota/notify", qos=1)
+                client.subscribe(f"hesta/nodes/{sim_node}/ota/abort", qos=1)
 
             print(f"  → Subscribed: {C_CYAN}{AC_COMMAND_TOPIC}{C_RESET}")
             print(f"  → Subscribed: {C_CYAN}{GATE_COMMAND_TOPIC}{C_RESET}")
             print(f"  → Subscribed: {C_CYAN}hesta/nodes/+/devices/+/command (Lights & LEDs){C_RESET}")
+            print(f"  → Subscribed: {C_CYAN}hesta/nodes/<SIM_NODE>/{{ping,ota/notify,ota/abort}}{C_RESET}")
 
-            # 2. Publish initial ONLINE status and telemetry
+            # 2. Publish initial ONLINE status, registration metadata (firmwareVersion), and telemetry
+            self.publish_node_register(AC_NODE_ID)
+            self.publish_node_register(GATE_NODE_ID)
+            self.publish_node_register(SENSOR_NODE_ID)
             self.publish_status(AC_NODE_ID, "ONLINE")
             self.publish_status(GATE_NODE_ID, "ONLINE")
             self.publish_status(SENSOR_NODE_ID, "ONLINE")
@@ -212,12 +237,114 @@ class HardwareSimulator:
         node_id = parts[2] if len(parts) >= 3 else "unknown"
         device_id = parts[4] if len(parts) >= 5 else "unknown"
 
+        if topic.endswith("/ping"):
+            if node_id in self.node_firmware_versions:
+                self.handle_ping(node_id, data)
+            return
+        elif topic.endswith("/ota/abort"):
+            if node_id in self.node_firmware_versions:
+                self.handle_ota_abort(node_id, data)
+            return
+        elif topic.endswith("/ota/notify"):
+            if node_id in self.node_firmware_versions:
+                threading.Thread(target=self.handle_ota_notify, args=(node_id, data), daemon=True).start()
+            return
+
         if AC_NODE_ID in topic or "devices/" + AC_DEVICE_ID in topic:
             self.handle_ac_command(data)
         elif GATE_NODE_ID in topic or "devices/" + GATE_DEVICE_ID in topic:
             self.handle_gate_command(data)
         else:
             self.handle_generic_light_command(node_id, device_id, data)
+
+    # ==========================================================================
+    # Diagnostics Ping/Pong & Real HTTP OTA Firmware Handler
+    # ==========================================================================
+    def publish_node_register(self, node_id):
+        topic = f"hesta/nodes/{node_id}/register"
+        payload = {
+            "nodeId": node_id,
+            "nodeCode": node_id,
+            "deviceType": self.node_device_types.get(node_id, "ESP32_RELAY"),
+            "firmwareVersion": self.node_firmware_versions.get(node_id, "v1.0.0"),
+            "timestamp": int(time.time() * 1000),
+        }
+        self.client.publish(topic, json.dumps(payload), qos=1)
+
+    def handle_ping(self, node_id, data):
+        pong_topic = f"hesta/nodes/{node_id}/pong"
+        pong_payload = {
+            "pingId": data.get("pingId", ""),
+            "nodeCode": node_id,
+            "firmwareVersion": self.node_firmware_versions.get(node_id, "v1.0.0"),
+            "timestamp": int(time.time() * 1000),
+        }
+        self.client.publish(pong_topic, json.dumps(pong_payload), qos=1)
+        print(f"  {C_GREEN}✔ [DIAGNOSTICS PONG]{C_RESET} Topic: {pong_topic} | pingId={pong_payload['pingId']}")
+
+    def handle_ota_abort(self, node_id, data):
+        campaign_id = str(data.get("campaignId", "")).strip()
+        if campaign_id:
+            with self.ota_lock:
+                self.aborted_campaigns.add(campaign_id)
+        print(f"  {C_RED}⚠ [OTA ABORT RECEIVED]{C_RESET} Node {node_id} cancelled campaign {campaign_id}: {data.get('reason', '')}")
+
+    def _publish_ota_status(self, node_id, campaign_id, version, status, error=None):
+        topic = f"hesta/nodes/{node_id}/ota/status"
+        payload = {
+            "campaignId": campaign_id,
+            "nodeCode": node_id,
+            "version": version,
+            "status": status,
+            "error": error or "",
+            "timestamp": int(time.time() * 1000),
+        }
+        self.client.publish(topic, json.dumps(payload), qos=1)
+
+    def handle_ota_notify(self, node_id, data):
+        campaign_id = str(data.get("campaignId", "")).strip()
+        version = str(data.get("version", "")).strip()
+        file_url = str(data.get("fileUrl", "")).strip()
+        expected_sha = str(data.get("checksumSha256", "")).strip().lower()
+
+        print(f"  {C_YELLOW}↓ [OTA UPDATE RECEIVED]{C_RESET} Node {node_id} -> {version} ({file_url})")
+        with self.ota_lock:
+            if campaign_id in self.aborted_campaigns:
+                print(f"  {C_RED}✖ [OTA SKIPPED]{C_RESET} Campaign {campaign_id} already aborted.")
+                return
+
+        self._publish_ota_status(node_id, campaign_id, version, "DOWNLOADING")
+        try:
+            if not (file_url.startswith("http://") or file_url.startswith("https://")):
+                raise ValueError(f"Unsupported OTA URL scheme: {file_url}")
+
+            req = urllib.request.Request(file_url, headers={"User-Agent": "HESTA-EdgeNode-Simulator/1.0"})
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                firmware_bytes = resp.read()
+
+            if not firmware_bytes:
+                raise ValueError("Empty firmware binary downloaded")
+
+            self._publish_ota_status(node_id, campaign_id, version, "VERIFYING")
+            actual_sha = hashlib.sha256(firmware_bytes).hexdigest().lower()
+            if expected_sha and actual_sha != expected_sha:
+                raise ValueError(f"SHA-256 mismatch (expected {expected_sha[:12]}..., got {actual_sha[:12]}...)")
+
+            with self.ota_lock:
+                if campaign_id in self.aborted_campaigns:
+                    raise RuntimeError("OTA cancelled by admin abort command before reboot")
+
+            self._publish_ota_status(node_id, campaign_id, version, "REBOOTING")
+            time.sleep(0.5)
+            self.node_firmware_versions[node_id] = version
+            self._publish_ota_status(node_id, campaign_id, version, "SUCCESS")
+            self.publish_node_register(node_id)
+            self.publish_status(node_id, "ONLINE")
+            print(f"  {C_GREEN}✔ [OTA COMPLETED]{C_RESET} Node {node_id} updated to {version} (size={len(firmware_bytes)}B)")
+        except Exception as exc:
+            err_msg = str(exc)
+            print(f"  {C_RED}✖ [OTA FAILED]{C_RESET} Node {node_id}: {err_msg}")
+            self._publish_ota_status(node_id, campaign_id, version, "FAILED", error=err_msg)
 
     # ==========================================================================
     # Smart Light / LED RGB / Relay Emulation
