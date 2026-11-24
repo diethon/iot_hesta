@@ -7,14 +7,14 @@
 // WiFi - Smartphone Hotspot
 // =================================================
 
-const char* WIFI_SSID = "Dung Home T3";
-const char* WIFI_PASSWORD = "123lyvanphuc";
+const char* WIFI_SSID = "NGUYEN-TOAN";
+const char* WIFI_PASSWORD = "12345678";
 
 // =================================================
 // MQTT
 // =================================================
 
-const char* MQTT_SERVER = "192.168.88.104";
+const char* MQTT_SERVER = "192.168.137.107";
 const int MQTT_PORT = 1883;
 // =================================================
 // Sensor pins
@@ -388,6 +388,7 @@ void setup() {
         MQTT_SERVER,
         MQTT_PORT
     );
+    mqttClient.setBufferSize(1024); // Đảm bảo buffer đủ lớn cho Topic + Payload JSON (tránh lỗi publish FAILED do tràn buffer mặc định 128/256 bytes)
 
     Serial.println();
     Serial.println("Setup completed.");

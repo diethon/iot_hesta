@@ -1,3 +1,94 @@
+# ==============================================================================
+# Hesta IoT - Git Ignore Rules
+# ==============================================================================
+
+# Compiled Binaries & Object Files
+*.o
+*.obj
+*.so
+*.dylib
+*.dll
+*.a
+*.lib
+*.hex
+*.bin
+*.elf
+*.eep
+*.lst
+*.map
+*.srec
+
+# Arduino IDE & ESP Build Artifacts
+arduino_build_*
+arduino_cache_*
+build/
+bin/
+out/
+
+# PlatformIO
+.pio/
+.pioenvs/
+.piolibdeps/
+.clang_complete
+
+# CMake Build System
+CMakeLists.txt.user
+CMakeCache.txt
+CMakeFiles/
+CMakeScripts/
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+cmake-build-*/
+
+# Python Virtual Environments & Bytecode Caches
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyo
+.pytest_cache/
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+
+# IDEs & Editor Configuration
+.idea/
+*.iml
+*.iws
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.bak
+*.orig
+*~
+
+# Operating System Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+[Dd]esktop.ini
+
+# Microsoft Office Temporary Lock Files (e.g., when editing Word documents)
+~$*
+
+# Local Configs & Sensitive Credentials
+*.local
+.env
+.env.*
+!*.example.env
+!*.template.env
+secrets.h
+credentials.h
 __pycache__/
 *.pyc
 .DS_Store
