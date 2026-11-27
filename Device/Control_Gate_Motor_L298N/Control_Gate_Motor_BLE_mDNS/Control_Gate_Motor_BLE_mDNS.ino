@@ -9,6 +9,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include "HestaOta.h"
 
 // ============================================================
 // ESP32-CAM AI-THINKER
@@ -65,6 +66,7 @@ BLECharacteristic *commCharacteristic = nullptr;
 // ============================================================
 
 const char* NODE_ID = "8d1cdd82-b339-469e-be13-7e91070f7ae5";
+const char* FIRMWARE_VERSION = "1.0.0";
 
 
 // ============================================================
@@ -1055,6 +1057,9 @@ void mqttCallback(
   byte* payload,
   unsigned int length
 ) {
+  if (hestaOtaHandleMqttMessage(topic, payload, length)) {
+    return;
+  }
 
   Serial.println();
   Serial.println(
@@ -1266,6 +1271,7 @@ bool connectMQTT() {
     // --------------------------------------------------------
 
     publishState();
+    hestaOtaOnMqttConnected();
 
 
     return true;
@@ -1461,6 +1467,18 @@ void handleSerialCommand() {
 // ============================================================
 // SETUP
 // ============================================================
+void preOtaHardwareSafeStop() {
+  motorStop();
+  if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+    BLEDevice::getAdvertising()->stop();
+  }
+}
+
+void postOtaFailResume() {
+  if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+    BLEDevice::startAdvertising();
+  }
+}
 
 void setup() {
 
@@ -1573,6 +1591,8 @@ void setup() {
   // ==========================================================
 
   mqttClient.setCallback(mqttCallback);
+  mqttClient.setBufferSize(1024);
+  hestaOtaInit(&mqttClient, NODE_ID, FIRMWARE_VERSION, preOtaHardwareSafeStop, postOtaFailResume);
 
   // ==========================================================
   // BLE WIFI PROVISIONING
@@ -1718,6 +1738,7 @@ void loop() {
   // ----------------------------------------------------------
 
   handleMQTT();
+  hestaOtaLoop();
 
 
   // ----------------------------------------------------------

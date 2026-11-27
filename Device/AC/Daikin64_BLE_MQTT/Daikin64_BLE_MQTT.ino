@@ -9,6 +9,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include "HestaOta.h"
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
 #include <ir_Daikin.h>
@@ -48,6 +49,7 @@
 // BACKEND HESTA - NODE & DEVICE IDENTIFIERS
 // ============================================================
 #define DEFAULT_NODE_ID  "32442d7f-dfcf-4b2f-a380-adba32876cec"
+#define FIRMWARE_VERSION "1.0.0"
 
 // 1. Máy lạnh Daikin
 #define AC_DEVICE_ID     "05d8a4fd-d7f1-4c62-a70e-a4213552b054"
@@ -931,6 +933,7 @@ bool connectMQTT() {
     publishTVState();
 
     notifyBLE("{\"status\":\"mqtt_connected\"}");
+    hestaOtaOnMqttConnected();
     return true;
   } else {
     Serial.printf("[MQTT] Kết nối thất bại, rc=%d\n", mqttClient.state());
@@ -1489,6 +1492,10 @@ void processCommand(const char* action, JsonObject& doc, const char* commandId, 
 // MQTT CALLBACK (XỬ LÝ TIN NHẮN TỪ TOPIC)
 // ============================================================
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  if (hestaOtaHandleMqttMessage(topic, payload, length)) {
+    return;
+  }
+
   char message[length + 1];
   memcpy(message, payload, length);
   message[length] = '\0';
@@ -1510,6 +1517,7 @@ void mqttCallback(char* topic, byte* payload, unsigned int length) {
       String extractedNode = topicStr.substring(start, end);
       if (extractedNode != "+" && extractedNode.length() > 0) {
         currentNodeId = extractedNode;
+        hestaOtaSetNodeId(currentNodeId);
       }
     }
   }
@@ -1811,6 +1819,18 @@ void printStatus() {
 // ============================================================
 // ARDUINO SETUP & LOOP
 // ============================================================
+void preOtaHardwareSafeStop() {
+  if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+    BLEDevice::getAdvertising()->stop();
+  }
+}
+
+void postOtaFailResume() {
+  if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+    BLEDevice::startAdvertising();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
@@ -1835,6 +1855,9 @@ void setup() {
 
   // Khởi tạo phần cứng BLE Provisioning
   startBLE();
+
+  mqttClient.setBufferSize(1024);
+  hestaOtaInit(&mqttClient, currentNodeId.c_str(), FIRMWARE_VERSION, preOtaHardwareSafeStop, postOtaFailResume);
 
   // Nếu đã có thông tin WiFi lưu trong Flash, tự động kết nối
   if (wifiSSID.length() > 0) {
@@ -1877,6 +1900,7 @@ void loop() {
       }
     } else {
       mqttClient.loop();
+      hestaOtaLoop();
 
       // Gửi Telemetry định kỳ mỗi 60 giây cho cả AC và TV
       unsigned long now = millis();

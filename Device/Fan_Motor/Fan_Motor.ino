@@ -8,6 +8,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include "HestaOta.h"
 
 // ============================================================
 // HESTA / SYNA SMART HOME - FAN & MOTOR CONTROLLER
@@ -42,6 +43,7 @@
 #define NODE_ID          "bbb20810-1591-41ca-b3be-daea1466fab5"
 #define FAN_DEVICE_ID    "6643cf42-bb8e-434e-a440-743afe06c457"
 #define MOTOR_DEVICE_ID  "664017ce-c045-4b0e-9a26-f9f95f996803"
+#define FIRMWARE_VERSION "1.0.0"
 
 // ============================================================
 // BLE PROVISIONING CONFIGURATION (SYNA MOBILE APP)
@@ -533,6 +535,7 @@ bool connectMQTT() {
 
     // Thông báo cho app nếu app đang mở
     notifyBLE("{\"status\":\"mqtt_connected\"}");
+    hestaOtaOnMqttConnected();
     return true;
   } else {
     Serial.print("[MQTT] Kết nối thất bại, mã lỗi rc=");
@@ -649,6 +652,10 @@ void publishMotorState(const char* commandId) {
 // MQTT CALLBACK (XỬ LÝ LỆNH TỪ BACKEND / APP)
 // ============================================================
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  if (hestaOtaHandleMqttMessage(topic, payload, length)) {
+    return;
+  }
+
   char message[length + 1];
   memcpy(message, payload, length);
   message[length] = '\0';
@@ -852,6 +859,19 @@ void printStatus() {
 // ============================================================
 // SETUP
 // ============================================================
+void preOtaHardwareSafeStop() {
+  setMotor(false, nullptr);
+  if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+    BLEDevice::getAdvertising()->stop();
+  }
+}
+
+void postOtaFailResume() {
+  if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+    BLEDevice::startAdvertising();
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(500);
@@ -879,6 +899,9 @@ void setup() {
 
   // Khởi tạo BLE trước để App luôn có thể scan và kết nối
   startBLE();
+
+  mqttClient.setBufferSize(1024);
+  hestaOtaInit(&mqttClient, NODE_ID, FIRMWARE_VERSION, preOtaHardwareSafeStop, postOtaFailResume);
 
   // Đọc thông tin WiFi và MQTT từ flash (NVS)
   loadStoredWiFi();
@@ -958,6 +981,7 @@ void loop() {
       }
     } else {
       mqttClient.loop();
+      hestaOtaLoop();
     }
   }
 

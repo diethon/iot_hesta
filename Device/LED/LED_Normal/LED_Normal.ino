@@ -43,6 +43,7 @@
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#include "HestaOta.h"
 
 // ====================================================================================================
 // 1. CẤU HÌNH NODE & DEVICE IDS (HESTA BACKEND / DATABASE)
@@ -1402,6 +1403,7 @@ void connectMQTT() {
 
         publishAllTelemetries();
         publishNodeDiscovery();
+        hestaOtaOnMqttConnected();
     } else {
         Serial.printf("[MQTT ERROR] Ket noi that bai, ma loi rc=%d. Thu lai sau...\n", mqttClient.state());
     }
@@ -1571,6 +1573,10 @@ void publishNodeDiscovery() {
  * Callback nhận thông điệp MQTT từ Broker
  */
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    if (hestaOtaHandleMqttMessage(topic, payload, length)) {
+        return;
+    }
+
     char message[length + 1];
     memcpy(message, payload, length);
     message[length] = '\0';
@@ -2618,6 +2624,20 @@ void handleSerialCommands() {
 // ====================================================================================================
 // 15. ARDUINO SETUP & LOOP
 // ====================================================================================================
+void preOtaHardwareSafeStop() {
+    gateStop(nullptr, false);
+    doorStop(nullptr, false);
+    if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+        BLEDevice::getAdvertising()->stop();
+    }
+}
+
+void postOtaFailResume() {
+    if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+        BLEDevice::startAdvertising();
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -2638,6 +2658,8 @@ void setup() {
     loadAllStatesFromNVS();
     loadMotorConfigFromNVS();
     loadNetworkConfigFromNVS();
+
+    hestaOtaInit(&mqttClient, NODE_ID, FIRMWARE_VERSION, preOtaHardwareSafeStop, postOtaFailResume);
 
     // 4. Kiểm tra chế độ chạy (Offline Test vs Online đầy đủ)
     if (offlineTestMode) {
@@ -2706,6 +2728,7 @@ void loop() {
                 }
             } else {
                 mqttClient.loop();
+                hestaOtaLoop();
 
                 // 2.4 Gửi Telemetry định kỳ
                 if (now - lastTelemetryPublish >= TELEMETRY_INTERVAL_MS) {

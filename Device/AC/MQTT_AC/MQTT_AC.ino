@@ -3,9 +3,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
-#include <Update.h>
-#include <mbedtls/md.h>
+#include "HestaOta.h"
 
 #include <IRremoteESP8266.h>
 #include <IRsend.h>
@@ -41,12 +39,7 @@
 #define DEVICE_TYPE      "AIR_CONDITIONER"
 #define FIRMWARE_VERSION "v1.0.0"
 
-#define MQTT_NODE_PING_TOPIC      "hesta/nodes/" NODE_ID "/ping"
-#define MQTT_NODE_PONG_TOPIC      "hesta/nodes/" NODE_ID "/pong"
 #define MQTT_NODE_REGISTER_TOPIC  "hesta/nodes/" NODE_ID "/register"
-#define MQTT_NODE_OTA_NOTIFY      "hesta/nodes/" NODE_ID "/ota/notify"
-#define MQTT_NODE_OTA_ABORT       "hesta/nodes/" NODE_ID "/ota/abort"
-#define MQTT_NODE_OTA_STATUS      "hesta/nodes/" NODE_ID "/ota/status"
 
 
 // ============================================================
@@ -1372,10 +1365,8 @@ void processMQTTCommand(
 
 
 // ============================================================
-// DIAGNOSTICS PONG & HTTP OTA FIRMWARE HANDLER
+// NODE REGISTRATION (OTA/PING HANDLED BY HestaOta.h)
 // ============================================================
-
-String acAbortedCampaignId = "";
 
 void publishAcNodeRegister()
 {
@@ -1389,108 +1380,6 @@ void publishAcNodeRegister()
     mqttClient.publish(MQTT_NODE_REGISTER_TOPIC, buf, true);
 }
 
-void publishAcOtaStatus(const String& campaignId, const String& version, const String& status, const String& err)
-{
-    JsonDocument doc;
-    doc["campaignId"] = campaignId;
-    doc["nodeCode"] = NODE_ID;
-    doc["version"] = version;
-    doc["status"] = status;
-    doc["error"] = err;
-    char buf[384];
-    serializeJson(doc, buf, sizeof(buf));
-    mqttClient.publish(MQTT_NODE_OTA_STATUS, buf, false);
-    mqttClient.loop();
-}
-
-void performAcHttpOta(const String& campaignId, const String& version, const String& fileUrl, const String& expectedSha256)
-{
-    if (acAbortedCampaignId == campaignId) {
-        publishAcOtaStatus(campaignId, version, "FAILED", "Aborted before start");
-        return;
-    }
-
-    publishAcOtaStatus(campaignId, version, "DOWNLOADING", "");
-    HTTPClient http;
-    WiFiClient downloadClient;
-    http.setTimeout(20000);
-    if (!http.begin(downloadClient, fileUrl)) {
-        publishAcOtaStatus(campaignId, version, "FAILED", "Invalid firmware URL");
-        return;
-    }
-
-    int code = http.GET();
-    int contentLen = http.getSize();
-    if (code != HTTP_CODE_OK || contentLen <= 0 || !Update.begin((size_t)contentLen)) {
-        publishAcOtaStatus(campaignId, version, "FAILED", "HTTP/Update init error: " + String(code));
-        http.end();
-        return;
-    }
-
-    mbedtls_md_context_t shaCtx;
-    mbedtls_md_init(&shaCtx);
-    mbedtls_md_setup(&shaCtx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
-    mbedtls_md_starts(&shaCtx);
-
-    WiFiClient* stream = http.getStreamPtr();
-    uint8_t buf[1024];
-    size_t written = 0;
-
-    while (http.connected() && written < (size_t)contentLen) {
-        mqttClient.loop();
-        if (acAbortedCampaignId == campaignId) {
-            Update.abort();
-            mbedtls_md_free(&shaCtx);
-            http.end();
-            publishAcOtaStatus(campaignId, version, "FAILED", "Aborted by Admin");
-            return;
-        }
-        size_t avail = stream->available();
-        if (avail > 0) {
-            int rd = stream->readBytes(buf, avail > sizeof(buf) ? sizeof(buf) : avail);
-            if (rd > 0) {
-                mbedtls_md_update(&shaCtx, buf, rd);
-                if (Update.write(buf, rd) != (size_t)rd) {
-                    Update.abort();
-                    mbedtls_md_free(&shaCtx);
-                    http.end();
-                    publishAcOtaStatus(campaignId, version, "FAILED", "Flash write error");
-                    return;
-                }
-                written += rd;
-            }
-        } else {
-            delay(5);
-        }
-    }
-
-    publishAcOtaStatus(campaignId, version, "VERIFYING", "");
-    uint8_t digest[32];
-    mbedtls_md_finish(&shaCtx, digest);
-    mbedtls_md_free(&shaCtx);
-    http.end();
-
-    char hex[65];
-    for (int i = 0; i < 32; i++) sprintf(&hex[i * 2], "%02x", digest[i]);
-    hex[64] = '\0';
-
-    if (expectedSha256.length() == 64 && !expectedSha256.equalsIgnoreCase(String(hex))) {
-        Update.abort();
-        publishAcOtaStatus(campaignId, version, "FAILED", "SHA-256 mismatch");
-        return;
-    }
-
-    if (!Update.end(true)) {
-        publishAcOtaStatus(campaignId, version, "FAILED", "Update.end failed");
-        return;
-    }
-
-    publishAcOtaStatus(campaignId, version, "REBOOTING", "");
-    publishAcOtaStatus(campaignId, version, "SUCCESS", "");
-    delay(500);
-    ESP.restart();
-}
-
 // ============================================================
 // MQTT CALLBACK
 // ============================================================
@@ -1501,6 +1390,11 @@ void mqttCallback(
     unsigned int length
 )
 {
+    if (hestaOtaHandleMqttMessage(topic, payload, length))
+    {
+        return;
+    }
+
     char message[1024];
 
     if (length >= sizeof(message))
@@ -1514,49 +1408,6 @@ void mqttCallback(
     );
 
     message[length] = '\0';
-
-    if (strcmp(topic, MQTT_NODE_PING_TOPIC) == 0)
-    {
-        JsonDocument pingDoc;
-        if (!deserializeJson(pingDoc, message))
-        {
-            JsonDocument pongDoc;
-            pongDoc["pingId"] = pingDoc["pingId"] | "";
-            pongDoc["nodeCode"] = NODE_ID;
-            pongDoc["firmwareVersion"] = FIRMWARE_VERSION;
-            char out[256];
-            serializeJson(pongDoc, out, sizeof(out));
-            mqttClient.publish(MQTT_NODE_PONG_TOPIC, out, false);
-        }
-        return;
-    }
-
-    if (strcmp(topic, MQTT_NODE_OTA_ABORT) == 0)
-    {
-        JsonDocument abortDoc;
-        if (!deserializeJson(abortDoc, message))
-        {
-            acAbortedCampaignId = abortDoc["campaignId"] | "";
-        }
-        return;
-    }
-
-    if (strcmp(topic, MQTT_NODE_OTA_NOTIFY) == 0)
-    {
-        JsonDocument otaDoc;
-        if (!deserializeJson(otaDoc, message))
-        {
-            String campaignId = otaDoc["campaignId"] | "";
-            String version = otaDoc["version"] | "";
-            String fileUrl = otaDoc["fileUrl"] | "";
-            String sha256 = otaDoc["checksumSha256"] | "";
-            if (fileUrl.length() > 0)
-            {
-                performAcHttpOta(campaignId, version, fileUrl, sha256);
-            }
-        }
-        return;
-    }
 
     processMQTTCommand(
         message
@@ -1617,11 +1468,9 @@ void connectMQTT()
             mqttClient.subscribe(
                 MQTT_COMMAND_TOPIC
             );
-            mqttClient.subscribe(MQTT_NODE_PING_TOPIC);
-            mqttClient.subscribe(MQTT_NODE_OTA_NOTIFY);
-            mqttClient.subscribe(MQTT_NODE_OTA_ABORT);
 
             publishAcNodeRegister();
+            hestaOtaOnMqttConnected();
 
             publishStatus(
                 "ONLINE"
@@ -1749,6 +1598,7 @@ void setup()
         1024
     );
 
+    hestaOtaInit(&mqttClient, NODE_ID, FIRMWARE_VERSION);
 
     connectMQTT();
 
@@ -1834,6 +1684,7 @@ void loop()
 
 
     mqttClient.loop();
+    hestaOtaLoop();
 
 
     delay(10);

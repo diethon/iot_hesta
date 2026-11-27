@@ -139,6 +139,7 @@ class HardwareSimulator:
             SENSOR_NODE_ID: "SENSOR",
         }
         self.aborted_campaigns = set()
+        self.active_or_finished_campaigns = set()
         self.ota_lock = threading.Lock()
 
         # Initialize MQTT Client
@@ -309,9 +310,14 @@ class HardwareSimulator:
 
         print(f"  {C_YELLOW}↓ [OTA UPDATE RECEIVED]{C_RESET} Node {node_id} -> {version} ({file_url})")
         with self.ota_lock:
+            if campaign_id and (campaign_id, node_id) in self.active_or_finished_campaigns:
+                print(f"  {C_YELLOW}↷ [OTA DUPLICATE IGNORED]{C_RESET} Node {node_id} already handled campaign {campaign_id}")
+                return
             if campaign_id in self.aborted_campaigns:
                 print(f"  {C_RED}✖ [OTA SKIPPED]{C_RESET} Campaign {campaign_id} already aborted.")
                 return
+            if campaign_id:
+                self.active_or_finished_campaigns.add((campaign_id, node_id))
 
         self._publish_ota_status(node_id, campaign_id, version, "DOWNLOADING")
         try:

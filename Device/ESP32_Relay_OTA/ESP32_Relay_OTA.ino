@@ -2,9 +2,7 @@
 #include <WiFi.h>
 #include <PubSubClient.h>
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
-#include <Update.h>
-#include <mbedtls/md.h>
+#include "HestaOta.h"
 
 // ============================================================
 // HESTA SMART HOME - ESP32 RELAY & OTA-READY CONTROLLER
@@ -36,7 +34,6 @@ WiFiClient espClient;
 PubSubClient mqttClient(espClient);
 
 bool relayOn = false;
-String abortedCampaignId = "";
 
 String topicPrefix() {
   return String("hesta/nodes/") + NODE_ID;
@@ -51,19 +48,6 @@ void publishNodeRegister() {
   String out;
   serializeJson(doc, out);
   mqttClient.publish((topicPrefix() + "/register").c_str(), out.c_str(), true);
-}
-
-void publishOtaStatus(const String& campaignId, const String& version, const String& status, const String& err) {
-  StaticJsonDocument<384> doc;
-  doc["campaignId"] = campaignId;
-  doc["nodeCode"] = NODE_ID;
-  doc["version"] = version;
-  doc["status"] = status;
-  doc["error"] = err;
-  String out;
-  serializeJson(doc, out);
-  mqttClient.publish((topicPrefix() + "/ota/status").c_str(), out.c_str(), false);
-  mqttClient.loop();
 }
 
 void publishRelayState(const char* commandId) {
@@ -87,142 +71,15 @@ void publishRelayState(const char* commandId) {
   }
 }
 
-void performHttpOtaUpdate(const String& campaignId, const String& version, const String& fileUrl, const String& expectedSha256) {
-  if (abortedCampaignId == campaignId) {
-    publishOtaStatus(campaignId, version, "FAILED", "Campaign aborted before start");
-    return;
-  }
-
-  publishOtaStatus(campaignId, version, "DOWNLOADING", "");
-
-  HTTPClient http;
-  WiFiClient downloadClient;
-  http.setTimeout(20000);
-  if (!http.begin(downloadClient, fileUrl)) {
-    publishOtaStatus(campaignId, version, "FAILED", "Cannot open firmware URL");
-    return;
-  }
-
-  int httpCode = http.GET();
-  if (httpCode != HTTP_CODE_OK) {
-    publishOtaStatus(campaignId, version, "FAILED", "HTTP error code " + String(httpCode));
-    http.end();
-    return;
-  }
-
-  int contentLen = http.getSize();
-  if (contentLen <= 0) {
-    publishOtaStatus(campaignId, version, "FAILED", "Invalid Content-Length");
-    http.end();
-    return;
-  }
-
-  if (!Update.begin((size_t)contentLen)) {
-    publishOtaStatus(campaignId, version, "FAILED", "Not enough flash space for OTA");
-    http.end();
-    return;
-  }
-
-  mbedtls_md_context_t shaCtx;
-  mbedtls_md_init(&shaCtx);
-  mbedtls_md_setup(&shaCtx, mbedtls_md_info_from_type(MBEDTLS_MD_SHA256), 0);
-  mbedtls_md_starts(&shaCtx);
-
-  WiFiClient* stream = http.getStreamPtr();
-  uint8_t buf[1024];
-  size_t totalWritten = 0;
-
-  while (http.connected() && (totalWritten < (size_t)contentLen)) {
-    mqttClient.loop();
-    if (abortedCampaignId == campaignId) {
-      Update.abort();
-      mbedtls_md_free(&shaCtx);
-      http.end();
-      publishOtaStatus(campaignId, version, "FAILED", "Aborted by Admin during download");
-      return;
-    }
-
-    size_t avail = stream->available();
-    if (avail > 0) {
-      size_t toRead = avail > sizeof(buf) ? sizeof(buf) : avail;
-      int readLen = stream->readBytes(buf, toRead);
-      if (readLen > 0) {
-        mbedtls_md_update(&shaCtx, buf, readLen);
-        if (Update.write(buf, readLen) != (size_t)readLen) {
-          Update.abort();
-          mbedtls_md_free(&shaCtx);
-          http.end();
-          publishOtaStatus(campaignId, version, "FAILED", "Flash write error");
-          return;
-        }
-        totalWritten += readLen;
-      }
-    } else {
-      delay(5);
-    }
-  }
-
-  publishOtaStatus(campaignId, version, "VERIFYING", "");
-  uint8_t digest[32];
-  mbedtls_md_finish(&shaCtx, digest);
-  mbedtls_md_free(&shaCtx);
-  http.end();
-
-  char hexDigest[65];
-  for (int i = 0; i < 32; i++) {
-    sprintf(&hexDigest[i * 2], "%02x", digest[i]);
-  }
-  hexDigest[64] = '\0';
-
-  if (expectedSha256.length() == 64 && !expectedSha256.equalsIgnoreCase(String(hexDigest))) {
-    Update.abort();
-    publishOtaStatus(campaignId, version, "FAILED", "SHA-256 checksum mismatch");
-    return;
-  }
-
-  if (!Update.end(true)) {
-    publishOtaStatus(campaignId, version, "FAILED", "Update finalize failed");
-    return;
-  }
-
-  publishOtaStatus(campaignId, version, "REBOOTING", "");
-  publishOtaStatus(campaignId, version, "SUCCESS", "");
-  delay(500);
-  ESP.restart();
-}
-
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+  if (hestaOtaHandleMqttMessage(topic, payload, length)) {
+    return;
+  }
+
   String topicStr(topic);
   StaticJsonDocument<1024> doc;
   DeserializationError err = deserializeJson(doc, payload, length);
   if (err) {
-    return;
-  }
-
-  if (topicStr == topicPrefix() + "/ping") {
-    StaticJsonDocument<256> pong;
-    pong["pingId"] = doc["pingId"] | "";
-    pong["nodeCode"] = NODE_ID;
-    pong["firmwareVersion"] = FIRMWARE_VERSION;
-    String out;
-    serializeJson(pong, out);
-    mqttClient.publish((topicPrefix() + "/pong").c_str(), out.c_str(), false);
-    return;
-  }
-
-  if (topicStr == topicPrefix() + "/ota/abort") {
-    abortedCampaignId = doc["campaignId"] | "";
-    return;
-  }
-
-  if (topicStr == topicPrefix() + "/ota/notify") {
-    String campaignId = doc["campaignId"] | "";
-    String version = doc["version"] | "";
-    String fileUrl = doc["fileUrl"] | "";
-    String sha256 = doc["checksumSha256"] | "";
-    if (fileUrl.length() > 0) {
-      performHttpOtaUpdate(campaignId, version, fileUrl, sha256);
-    }
     return;
   }
 
@@ -251,12 +108,10 @@ void ensureMqttConnected() {
       : mqttClient.connect(clientId.c_str());
   if (ok) {
     mqttClient.subscribe((topicPrefix() + "/devices/+/command").c_str());
-    mqttClient.subscribe((topicPrefix() + "/ping").c_str());
-    mqttClient.subscribe((topicPrefix() + "/ota/notify").c_str());
-    mqttClient.subscribe((topicPrefix() + "/ota/abort").c_str());
     mqttClient.publish((topicPrefix() + "/status").c_str(), "\"ONLINE\"", true);
     publishNodeRegister();
     publishRelayState("");
+    hestaOtaOnMqttConnected();
   }
 }
 
@@ -274,6 +129,7 @@ void setup() {
   mqttClient.setServer(MQTT_SERVER, MQTT_PORT);
   mqttClient.setBufferSize(1024);
   mqttClient.setCallback(mqttCallback);
+  hestaOtaInit(&mqttClient, NODE_ID, FIRMWARE_VERSION);
   ensureMqttConnected();
 }
 
@@ -287,6 +143,7 @@ void loop() {
       }
     } else {
       mqttClient.loop();
+      hestaOtaLoop();
     }
   }
   delay(10);

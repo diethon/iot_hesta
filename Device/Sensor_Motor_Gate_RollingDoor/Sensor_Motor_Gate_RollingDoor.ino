@@ -59,6 +59,7 @@
 #include <BLE2902.h>
 #include <DHT.h>
 #include <Adafruit_Fingerprint.h>   // Thư viện "Adafruit Fingerprint Sensor Library" (hỗ trợ AS608 / R307 / R503)
+#include "HestaOta.h"
 
 // ====================================================================================================
 // 1. CẤU HÌNH NODE & DEVICE IDS (HESTA BACKEND / DATABASE)
@@ -104,7 +105,7 @@
 // Đặt true : BỎ QUA kết nối Wi-Fi, MQTT, BLE. Dành riêng để test cảm biến, 2 đèn, quạt, bơm, Servo qua Serial.
 //            Vòng lặp loop() chạy mượt mà tức thì, không bị đứng/lag bởi socket timeout 15s.
 // Đặt false: Chạy đầy đủ hệ thống thật (BLE Provisioning -> Wi-Fi -> mDNS -> MQTT Broker).
-#define OFFLINE_TEST_MODE true
+#define OFFLINE_TEST_MODE false
 bool offlineTestMode = OFFLINE_TEST_MODE;
 
 // --- 2.1 CẢM BIẾN MÔI TRƯỜNG & AN TOÀN PCCC ---
@@ -840,6 +841,7 @@ void connectMQTT() {
         publishAllTelemetries();
         readAndPublishDHT(); // Gửi ngay giá trị DHT lần đầu khi vừa kết nối Broker
         publishNodeDiscovery();
+        hestaOtaOnMqttConnected();
     } else {
         Serial.printf("[MQTT ERROR] Ket noi that bai, ma loi rc=%d. Thu lai sau...\n", mqttClient.state());
     }
@@ -1500,6 +1502,10 @@ void publishNodeDiscovery() {
  * Callback nhận thông điệp MQTT từ Broker
  */
 void mqttCallback(char* topic, byte* payload, unsigned int length) {
+    if (hestaOtaHandleMqttMessage(topic, payload, length)) {
+        return;
+    }
+
     char message[length + 1];
     memcpy(message, payload, length);
     message[length] = '\0';
@@ -3596,6 +3602,20 @@ void handleSerialCommands() {
 // ====================================================================================================
 // 18. ARDUINO SETUP & LOOP
 // ====================================================================================================
+void preOtaHardwareSafeStop() {
+    setPumpPower(false);
+    targetServoAngle = currentServoAngle;
+    if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+        BLEDevice::getAdvertising()->stop();
+    }
+}
+
+void postOtaFailResume() {
+    if (bleServer != nullptr && BLEDevice::getAdvertising() != nullptr) {
+        BLEDevice::startAdvertising();
+    }
+}
+
 void setup() {
     Serial.begin(115200);
     delay(1000);
@@ -3615,6 +3635,8 @@ void setup() {
 
     // 2b. Khởi tạo cảm biến vân tay AS608 (UART1: RX=GPIO16, TX=GPIO17)
     initFingerprint();
+
+    hestaOtaInit(&mqttClient, NODE_ID, FIRMWARE_VERSION, preOtaHardwareSafeStop, postOtaFailResume);
 
     // 3. Kiểm tra chế độ chạy (Offline Test vs Online đầy đủ)
     if (offlineTestMode) {
@@ -3689,6 +3711,7 @@ void loop() {
                 }
             } else {
                 mqttClient.loop();
+                hestaOtaLoop();
 
                 // 2.4 Gửi Telemetry định kỳ
                 if (now - lastTelemetryPublish >= TELEMETRY_INTERVAL_MS) {
