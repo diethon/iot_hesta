@@ -47,7 +47,8 @@
 // ============================================================
 // BACKEND HESTA - NODE & DEVICE IDENTIFIERS
 // ============================================================
-#define DEFAULT_NODE_ID  "32442d7f-dfcf-4b2f-a380-adba32876cec"
+#define NODE_ID          "32442d7f-dfcf-4b2f-a380-adba32876cec"
+#define DEFAULT_NODE_ID  NODE_ID
 
 // 1. Máy lạnh Daikin
 #define AC_DEVICE_ID     "05d8a4fd-d7f1-4c62-a70e-a4213552b054"
@@ -62,19 +63,52 @@
 #define DEVICE_TYPE      AC_DEVICE_TYPE
 
 // ============================================================
-// BLE PROVISIONING CONFIGURATION (SYNA MOBILE APP)
+// CHẾ ĐỘ TEST OFFLINE (SERIAL TEST MODE) & CẤU HÌNH HỆ THỐNG
 // ============================================================
-#define BLE_DEVICE_NAME        "SYNA-IR-HUB"
-#define BLE_SERVICE_UUID       "12345678-1234-1234-1234-123456789000"
-#define BLE_COMM_CHAR_UUID     "12345678-1234-1234-1234-123456789001"
+#define OFFLINE_TEST_MODE false
+bool offlineTestMode = OFFLINE_TEST_MODE;
 
 // ============================================================
-// MQTT & mDNS CONFIGURATION
+// CẤU HÌNH WIFI & MQTT BROKER FALLBACK (CHUẨN SYNA / HESTA)
 // ============================================================
-#define MQTT_DISCOVERY_SERVICE  "_syna-mqtt"
-#define MQTT_DISCOVERY_PROTOCOL "_tcp"
-#define DEFAULT_MQTT_PORT       1883
-#define FALLBACK_MQTT_IP        "192.168.137.107"
+#define DEFAULT_WIFI_SSID     "NGUYEN-TOAN"
+#define DEFAULT_WIFI_PASSWORD "12345678"
+
+#define FALLBACK_MQTT_IP      "192.168.137.107"
+#define DEFAULT_MQTT_PORT     1883
+#define MQTT_USER             ""
+#define MQTT_PASSWORD         ""
+
+#define MQTT_DISCOVERY_SERVICE  "syna-mqtt"
+#define MQTT_DISCOVERY_PROTOCOL "tcp"
+
+#define FIRMWARE_VERSION        "2.3.0"
+#define DEVICE_HUB_NAME         "SYNA-IR-HUB"
+
+// Topics MQTT chuyên biệt
+const String TOPIC_DEVICES_COMMAND    = "hesta/nodes/" NODE_ID "/devices/+/command";
+const String TOPIC_NODE_COMMAND       = "hesta/nodes/" NODE_ID "/command";
+
+// 1. Máy lạnh Daikin
+const String TOPIC_AC_COMMAND         = "hesta/nodes/" NODE_ID "/devices/" AC_DEVICE_ID "/command";
+const String TOPIC_AC_STATE           = "hesta/nodes/" NODE_ID "/devices/" AC_DEVICE_ID "/state";
+const String TOPIC_AC_ACK             = "hesta/nodes/" NODE_ID "/devices/" AC_DEVICE_ID "/ack";
+const String TOPIC_AC_TELEMETRY       = "hesta/nodes/" NODE_ID "/devices/" AC_DEVICE_ID "/telemetry";
+const String TOPIC_AC_STATUS          = "hesta/nodes/" NODE_ID "/devices/" AC_DEVICE_ID "/status";
+
+// 2. Ti vi TCL
+const String TOPIC_TV_COMMAND         = "hesta/nodes/" NODE_ID "/devices/" TV_DEVICE_ID "/command";
+const String TOPIC_TV_STATE           = "hesta/nodes/" NODE_ID "/devices/" TV_DEVICE_ID "/state";
+const String TOPIC_TV_ACK             = "hesta/nodes/" NODE_ID "/devices/" TV_DEVICE_ID "/ack";
+const String TOPIC_TV_TELEMETRY       = "hesta/nodes/" NODE_ID "/devices/" TV_DEVICE_ID "/telemetry";
+const String TOPIC_TV_STATUS          = "hesta/nodes/" NODE_ID "/devices/" TV_DEVICE_ID "/status";
+
+// ============================================================
+// BLE PROVISIONING CONFIGURATION (SYNA MOBILE APP)
+// ============================================================
+#define BLE_DEVICE_NAME        DEVICE_HUB_NAME
+#define BLE_SERVICE_UUID       "12345678-1234-1234-1234-123456789000"
+#define BLE_COMM_CHAR_UUID     "12345678-1234-1234-1234-123456789001"
 
 // ============================================================
 // TV BUTTONS DEFINITION (TCL - NIKAI 24-BIT IR PROTOCOL)
@@ -114,15 +148,15 @@ BLECharacteristic* commCharacteristic = nullptr;
 bool bleClientConnected = false;
 volatile bool shouldConnectWiFi = false;
 
-String wifiSSID = "";
-String wifiPassword = "";
+String wifiSSID = DEFAULT_WIFI_SSID;
+String wifiPassword = DEFAULT_WIFI_PASSWORD;
 
 bool mqttBrokerFound = false;
 IPAddress mqttBrokerIP;
 uint16_t mqttBrokerPort = DEFAULT_MQTT_PORT;
 
 // Dynamic Node ID để tự thích ứng với Node ID gửi từ Backend
-String currentNodeId = DEFAULT_NODE_ID;
+String currentNodeId = NODE_ID;
 
 // Virtual State của Điều hòa (AC)
 bool acPower = false;
@@ -143,6 +177,7 @@ unsigned long lastWiFiReconnectAttempt = 0;
 unsigned long lastMqttReconnectAttempt = 0;
 unsigned long lastDiscoveryAttempt = 0;
 unsigned long lastTelemetryPublish = 0;
+const unsigned long TELEMETRY_INTERVAL_MS = 30000;
 
 // Gói raw mẫu đã bắt được từ remote gốc Daikin (Cool, 26C, Fan Low, kèm Power Toggle)
 const uint16_t rawData[137] = {
@@ -165,9 +200,12 @@ const uint16_t rawData[137] = {
 // ============================================================
 // FORWARD DECLARATIONS
 // ============================================================
+void loadNetworkConfigFromNVS();
+void saveMQTTConfigToNVS(const String& ipStr, uint16_t port);
+void saveWiFiConfigToNVS(const String& ssid, const String& pass);
+void clearStoredWiFi();
 void loadStoredWiFi();
 void saveStoredWiFi(const String& ssid, const String& password);
-void clearStoredWiFi();
 void loadStoredMQTT();
 void saveStoredMQTT(const String& host, uint16_t port);
 void loadStoredACState();
@@ -177,6 +215,14 @@ void saveStoredTVState();
 
 void startBLE();
 void notifyBLE(const String& message);
+void notifyBleStatus(const char* status, const char* key1 = nullptr, const char* val1 = nullptr, const char* key2 = nullptr, const char* val2 = nullptr);
+
+bool connectWiFi();
+void handleWiFiProvisioning();
+bool discoverMQTTBroker();
+bool discoverMQTT();
+bool connectMQTT();
+void publishNodeDiscovery();
 
 void handleWiFiProvisioning();
 bool discoverMQTT();
@@ -325,53 +371,68 @@ void sendRawSignal() {
 }
 
 // ============================================================
-// NVS STORAGE (PREFERENCES)
+// NVS STORAGE (PREFERENCES - CHUẨN SYNA_NET & SYNA_DEV)
 // ============================================================
-void loadStoredWiFi() {
-  preferences.begin("wifi", true);
-  wifiSSID = preferences.getString("ssid", "");
-  wifiPassword = preferences.getString("password", "");
+void loadNetworkConfigFromNVS() {
+  preferences.begin("syna_net", true);
+  wifiSSID = preferences.getString("ssid", DEFAULT_WIFI_SSID);
+  wifiPassword = preferences.getString("pass", DEFAULT_WIFI_PASSWORD);
+  String storedMqtt = preferences.getString("mqtt_ip", "");
+  uint16_t storedPort = preferences.getUShort("mqtt_port", DEFAULT_MQTT_PORT);
   preferences.end();
 
-  if (wifiSSID.length() > 0) {
-    Serial.printf("[NVS] Tìm thấy WiFi đã lưu: %s\n", wifiSSID.c_str());
-  } else {
-    Serial.println("[NVS] Chưa có WiFi trong bộ nhớ flash.");
-  }
-}
-
-void saveStoredWiFi(const String& ssid, const String& password) {
-  preferences.begin("wifi", false);
-  preferences.putString("ssid", ssid);
-  preferences.putString("password", password);
-  preferences.end();
-  Serial.println("[NVS] Đã lưu thông tin WiFi vào flash.");
-}
-
-void loadStoredMQTT() {
-  preferences.begin("mqtt", true);
-  String storedHost = preferences.getString("host", "");
-  uint16_t storedPort = preferences.getUShort("port", 0);
-  preferences.end();
-
-  if (storedHost.length() > 0 && storedPort > 0) {
-    if (mqttBrokerIP.fromString(storedHost)) {
-      mqttBrokerPort = storedPort;
-      mqttBrokerFound = true;
-      Serial.printf("[NVS] Đã nạp MQTT Broker đã lưu: %s:%d\n", storedHost.c_str(), storedPort);
+  // Tương thích ngược nếu trước đó đã lưu ở namespace cũ "wifi" / "mqtt"
+  if (wifiSSID == DEFAULT_WIFI_SSID) {
+    preferences.begin("wifi", true);
+    String oldSsid = preferences.getString("ssid", "");
+    String oldPass = preferences.getString("password", "");
+    preferences.end();
+    if (oldSsid.length() > 0) {
+      wifiSSID = oldSsid;
+      wifiPassword = oldPass;
     }
   }
+
+  if (storedMqtt.length() == 0) {
+    preferences.begin("mqtt", true);
+    String oldHost = preferences.getString("host", "");
+    uint16_t oldPort = preferences.getUShort("port", 0);
+    preferences.end();
+    if (oldHost.length() > 0) {
+      storedMqtt = oldHost;
+      storedPort = oldPort;
+    }
+  }
+
+  if (storedMqtt.length() > 0) {
+    mqttBrokerIP.fromString(storedMqtt);
+    mqttBrokerPort = storedPort;
+    mqttBrokerFound = true;
+    Serial.printf("[NVS] Da tim thay MQTT Broker luu trong Flash: %s:%d\n", storedMqtt.c_str(), storedPort);
+  } else {
+    Serial.printf("[NVS] WiFi: %s | MQTT chua co san, se do mDNS\n", wifiSSID.c_str());
+  }
 }
 
-void saveStoredMQTT(const String& host, uint16_t port) {
-  preferences.begin("mqtt", false);
-  preferences.putString("host", host);
-  preferences.putUShort("port", port);
+void saveMQTTConfigToNVS(const String& ipStr, uint16_t port) {
+  preferences.begin("syna_net", false);
+  preferences.putString("mqtt_ip", ipStr);
+  preferences.putUShort("mqtt_port", port);
   preferences.end();
-  Serial.println("[NVS] Đã lưu thông tin MQTT Broker vào flash.");
+}
+
+void saveWiFiConfigToNVS(const String& ssid, const String& pass) {
+  preferences.begin("syna_net", false);
+  preferences.putString("ssid", ssid);
+  preferences.putString("pass", pass);
+  preferences.end();
 }
 
 void clearStoredWiFi() {
+  preferences.begin("syna_net", false);
+  preferences.clear();
+  preferences.end();
+
   preferences.begin("wifi", false);
   preferences.clear();
   preferences.end();
@@ -381,8 +442,14 @@ void clearStoredWiFi() {
   preferences.end();
 
   mqttBrokerFound = false;
-  Serial.println("[NVS] Đã xóa toàn bộ cấu hình WiFi & MQTT trong flash.");
+  Serial.println("[NVS] Da xoa toan bo cau hinh mang trong flash NVS.");
 }
+
+// Aliases tương thích ngược
+void loadStoredWiFi() { loadNetworkConfigFromNVS(); }
+void saveStoredWiFi(const String& ssid, const String& password) { saveWiFiConfigToNVS(ssid, password); }
+void loadStoredMQTT() { /* da nạp trong loadNetworkConfigFromNVS */ }
+void saveStoredMQTT(const String& host, uint16_t port) { saveMQTTConfigToNVS(host, port); }
 
 void loadStoredACState() {
   preferences.begin("ac_state", true);
@@ -429,17 +496,49 @@ void saveStoredTVState() {
 }
 
 // ============================================================
-// BLE CALLBACKS
+// BLE PROVISIONING (CHUẨN HỆ SINH THÁI SYNA MOBILE APP)
 // ============================================================
+void notifyBleStatus(const char* status, const char* key1, const char* val1, const char* key2, const char* val2) {
+  if (!bleClientConnected || commCharacteristic == nullptr) return;
+
+#if ARDUINOJSON_VERSION_MAJOR >= 7
+  JsonDocument doc;
+#else
+  DynamicJsonDocument doc(512);
+#endif
+
+  doc["status"] = status;
+  doc["nodeId"] = currentNodeId;
+  if (key1 && val1) doc[key1] = val1;
+  if (key2 && val2) doc[key2] = val2;
+
+  String jsonStr;
+  serializeJson(doc, jsonStr);
+
+  commCharacteristic->setValue(jsonStr.c_str());
+  commCharacteristic->notify();
+  delay(40);
+  Serial.printf("[BLE NOTIFY -> APP]: %s\n", jsonStr.c_str());
+}
+
+void notifyBLE(const String& message) {
+  if (commCharacteristic != nullptr && bleClientConnected) {
+    commCharacteristic->setValue(message.c_str());
+    commCharacteristic->notify();
+    Serial.printf("[BLE GỬI APP]: %s\n", message.c_str());
+  }
+}
+
 class SynaBLEServerCallbacks : public BLEServerCallbacks {
   void onConnect(BLEServer* server) override {
     bleClientConnected = true;
-    Serial.println("[BLE] Mobile App đã kết nối!");
+    Serial.println("\n[BLE] APP DI DONG DA KET NOI BLE!");
+    notifyBleStatus("ble_connected", "device", DEVICE_HUB_NAME);
   }
 
   void onDisconnect(BLEServer* server) override {
     bleClientConnected = false;
-    Serial.println("[BLE] Mobile App đã ngắt kết nối. Đang phát lại quảng bá...");
+    Serial.println("\n[BLE] APP NGAT KET NOI. Bat lai che do quang ba (Advertising)...");
     BLEDevice::startAdvertising();
   }
 };
@@ -461,7 +560,7 @@ class SynaBLECharacteristicCallbacks : public BLECharacteristicCallbacks {
 
     DeserializationError err = deserializeJson(doc, value);
     if (err) {
-      notifyBLE("{\"status\":\"error\",\"message\":\"invalid_json\"}");
+      notifyBleStatus("error", "message", "invalid_json");
       Serial.println("[BLE LỖI]: JSON không hợp lệ");
       return;
     }
@@ -475,12 +574,13 @@ class SynaBLECharacteristicCallbacks : public BLECharacteristicCallbacks {
       const char* password = doc["password"] | "";
 
       if (strlen(ssid) == 0) {
-        notifyBLE("{\"status\":\"error\",\"message\":\"ssid_required\"}");
+        notifyBleStatus("wifi_failed", "error", "empty_ssid");
         return;
       }
 
       wifiSSID = String(ssid);
       wifiPassword = String(password);
+      saveWiFiConfigToNVS(wifiSSID, wifiPassword);
 
       if (doc.containsKey("mqtt_host")) {
         const char* mHost = doc["mqtt_host"] | "";
@@ -489,15 +589,16 @@ class SynaBLECharacteristicCallbacks : public BLECharacteristicCallbacks {
           if (mqttBrokerIP.fromString(mHost)) {
             mqttBrokerPort = mPort;
             mqttBrokerFound = true;
-            saveStoredMQTT(mHost, mPort);
+            saveMQTTConfigToNVS(String(mHost), mPort);
             Serial.printf("[BLE] Nhận cấu hình MQTT: %s:%d\n", mHost, mPort);
           }
         }
       }
 
+      notifyBleStatus("connecting_wifi", "ssid", wifiSSID.c_str());
       shouldConnectWiFi = true;
-      notifyBLE("{\"status\":\"connecting_wifi\",\"message\":\"wifi_credentials_received\"}");
       Serial.println("[BLE] Đã nhận WiFi credentials, chuẩn bị kết nối...");
+      return;
     }
     // 2. Xóa WiFi
     else if (actStr == "reset_wifi") {
@@ -507,8 +608,9 @@ class SynaBLECharacteristicCallbacks : public BLECharacteristicCallbacks {
       mqttBrokerFound = false;
       WiFi.disconnect(true);
       mqttClient.disconnect();
-      notifyBLE("{\"status\":\"wifi_reset\",\"message\":\"WiFi credentials cleared\"}");
+      notifyBleStatus("wifi_reset", "message", "config_cleared");
       Serial.println("[BLE] Đã xóa thông tin WiFi trong NVS");
+      return;
     }
     // 3. Yêu cầu lấy thông tin thiết bị (Gồm cả AC và TV)
     else if (actStr == "get_info") {
@@ -517,6 +619,8 @@ class SynaBLECharacteristicCallbacks : public BLECharacteristicCallbacks {
 #else
       DynamicJsonDocument info(512);
 #endif
+      info["status"] = "info";
+      info["firmware"] = FIRMWARE_VERSION;
       info["nodeId"] = currentNodeId;
       info["ip"] = WiFi.localIP().toString();
       info["wifi_connected"] = (WiFi.status() == WL_CONNECTED);
@@ -541,20 +645,23 @@ class SynaBLECharacteristicCallbacks : public BLECharacteristicCallbacks {
       char buf[512];
       serializeJson(info, buf);
       notifyBLE(String(buf));
+      return;
     }
     // 4. Lệnh TV trực tiếp qua BLE
     else if (actStr.startsWith("TV_") || actStr == "SEND_BUTTON" || doc.containsKey("button") || String(doc["target"] | "") == "tv") {
       JsonObject obj = doc.as<JsonObject>();
       processTvCommand(actStr, obj, nullptr, TV_DEVICE_ID);
-      notifyBLE("{\"status\":\"success\",\"message\":\"tv_command_executed\"}");
+      notifyBleStatus("success", "message", "tv_command_executed");
+      return;
     }
     // 5. Lệnh AC trực tiếp qua BLE
     else if (actStr.startsWith("SET_") || actStr == "TOGGLE" || actStr == "POWER" || actStr == "RAW") {
       JsonObject obj = doc.as<JsonObject>();
       processCommand(action, obj, nullptr, AC_DEVICE_ID);
-      notifyBLE("{\"status\":\"success\",\"message\":\"ac_command_executed\"}");
+      notifyBleStatus("success", "message", "ac_command_executed");
+      return;
     } else {
-      notifyBLE("{\"status\":\"error\",\"message\":\"unknown_action\"}");
+      notifyBleStatus("error", "message", "unknown_action");
     }
   }
 };
@@ -563,7 +670,8 @@ class SynaBLECharacteristicCallbacks : public BLECharacteristicCallbacks {
 // BLE INITIALIZATION
 // ============================================================
 void startBLE() {
-  BLEDevice::init(BLE_DEVICE_NAME);
+  Serial.println("[BLE] Dang khoi tao BLE Server...");
+  BLEDevice::init(DEVICE_HUB_NAME);
   bleServer = BLEDevice::createServer();
   bleServer->setCallbacks(new SynaBLEServerCallbacks());
 
@@ -577,23 +685,24 @@ void startBLE() {
 
   commCharacteristic->addDescriptor(new BLE2902());
   commCharacteristic->setCallbacks(new SynaBLECharacteristicCallbacks());
-  commCharacteristic->setValue("{\"status\":\"ready\",\"device\":\"" BLE_DEVICE_NAME "\"}");
+  commCharacteristic->setValue("{\"status\":\"ready\",\"device\":\"" DEVICE_HUB_NAME "\"}");
   service->start();
 
-  BLEAdvertising* advertising = BLEDevice::getAdvertising();
-  advertising->addServiceUUID(BLE_SERVICE_UUID);
-  advertising->setScanResponse(true);
+  BLEAdvertising* adv = BLEDevice::getAdvertising();
+  BLEAdvertisementData advData;
+  advData.setName(DEVICE_HUB_NAME);
+  advData.setFlags(0x06);
+
+  BLEAdvertisementData scanData;
+  scanData.setCompleteServices(BLEUUID(BLE_SERVICE_UUID));
+
+  adv->setAdvertisementData(advData);
+  adv->setScanResponseData(scanData);
+  adv->setMinPreferred(0x06);
+  adv->setMinPreferred(0x12);
+
   BLEDevice::startAdvertising();
-
-  Serial.printf("[BLE] Đang phát quảng bá với tên: %s\n", BLE_DEVICE_NAME);
-}
-
-void notifyBLE(const String& message) {
-  if (commCharacteristic != nullptr && bleClientConnected) {
-    commCharacteristic->setValue(message.c_str());
-    commCharacteristic->notify();
-    Serial.printf("[BLE GỬI APP]: %s\n", message.c_str());
-  }
+  Serial.printf("[BLE] Quang ba BLE thanh cong! Ten: %s | UUID: %s\n", DEVICE_HUB_NAME, BLE_SERVICE_UUID);
 }
 
 // ============================================================
@@ -763,180 +872,224 @@ void setupWebServer() {
 }
 
 // ============================================================
-// WIFI CONNECTION & PROVISIONING
+// WIFI CONNECTION & PROVISIONING (CHUẨN SYNA)
 // ============================================================
-void handleWiFiProvisioning() {
-  shouldConnectWiFi = false;
-  notifyBLE("{\"status\":\"connecting_wifi\"}");
+bool connectWiFi() {
+  Serial.println();
+  Serial.println("==================================================");
+  Serial.printf("[WIFI] DANG KET NOI WIFI: %s ...\n", wifiSSID.c_str());
+  Serial.println("==================================================");
 
-  mqttClient.disconnect();
   WiFi.disconnect(true);
   delay(200);
-
-  Serial.println();
-  Serial.println("======================================");
-  Serial.printf("[WiFi] Đang kết nối tới: %s\n", wifiSSID.c_str());
-  Serial.println("======================================");
-
   WiFi.mode(WIFI_STA);
   WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
 
-  unsigned long startedAt = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - startedAt < 15000) {
-    delay(300);
+  unsigned long start = millis();
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(400);
     Serial.print(".");
-  }
-  Serial.println();
-
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("[WiFi] KẾT NỐI THÀNH CÔNG!");
-    Serial.printf("[WiFi] IP: %s | RSSI: %d dBm\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
-
-    saveStoredWiFi(wifiSSID, wifiPassword);
-
-    String okJson = "{\"status\":\"wifi_connected\",\"ip\":\"" + WiFi.localIP().toString() + "\"}";
-    notifyBLE(okJson);
-
-    // Khởi chạy Web Server cục bộ để test nhanh trên trình duyệt
-    setupWebServer();
-
-    delay(1000);
-    mqttBrokerFound = false;
-    if (discoverMQTT()) {
-      if (connectMQTT()) {
-        notifyBLE("{\"status\":\"mqtt_connected\"}");
-      }
+    if (millis() - start > 15000) {
+      Serial.println("\n[WIFI ERROR] Ket noi WiFi timeout (Sai SSID/Mat khau hoac song yeu)!");
+      notifyBleStatus("wifi_failed", "error", "timeout");
+      return false;
     }
-  } else {
-    Serial.println("[WiFi] Kết nối thất bại. Vui lòng kiểm tra lại mật khẩu.");
-    notifyBLE("{\"status\":\"wifi_failed\",\"error\":\"Sai mật khẩu hoặc sóng yếu\"}");
-    WiFi.disconnect(true);
   }
+
+  Serial.println();
+  Serial.println("==================================================");
+  Serial.println("[WIFI] DA KET NOI WIFI THANH CONG!");
+  Serial.printf(" - Dia chi IP ESP32: %s\n", WiFi.localIP().toString().c_str());
+  Serial.printf(" - Do manh tin hieu: %d dBm\n", WiFi.RSSI());
+  Serial.println("==================================================");
+
+  saveWiFiConfigToNVS(wifiSSID, wifiPassword);
+  notifyBleStatus("wifi_connected", "ip", WiFi.localIP().toString().c_str());
+  setupWebServer();
+  return true;
+}
+
+void handleWiFiProvisioning() {
+  connectWiFi();
 }
 
 // ============================================================
 // mDNS AUTO-DISCOVERY (MQTT BROKER)
 // ============================================================
-bool discoverMQTT() {
+bool discoverMQTTBroker() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
   Serial.println();
-  Serial.println("======================================");
-  Serial.println("[mDNS] Đang tìm kiếm MQTT broker qua DNS-SD...");
-  Serial.println("       Dịch vụ: _syna-mqtt._tcp.local");
-  Serial.println("======================================");
+  Serial.println("[mDNS] Dang do tim Mosquitto Broker (_syna-mqtt._tcp)...");
 
-  MDNS.end();
   String mdnsHost = "syna-hub-" + String((uint32_t)ESP.getEfuseMac(), HEX);
   if (!MDNS.begin(mdnsHost.c_str())) {
-    Serial.println("[mDNS] Không thể khởi tạo mDNS responder");
-    return false;
+    Serial.println("[mDNS ERROR] Khong the khoi dong mDNS responder!");
   }
 
   int count = MDNS.queryService(MQTT_DISCOVERY_SERVICE, MQTT_DISCOVERY_PROTOCOL);
   if (count <= 0) {
-    count = MDNS.queryService("syna-mqtt", "tcp");
+    count = MDNS.queryService("_syna-mqtt", "_tcp");
   }
-
-  Serial.printf("[mDNS] Số broker tìm thấy: %d\n", count);
 
   if (count > 0) {
-    for (int i = 0; i < count; i++) {
-      IPAddress ip = MDNS.address(i);
-      uint16_t port = MDNS.port(i);
+    mqttBrokerIP = MDNS.address(0);
+    mqttBrokerPort = MDNS.port(0);
+    mqttBrokerFound = true;
 
-      Serial.printf("[mDNS] Broker #%d: %s | IP: %s | Port: %d\n",
-                    i + 1, MDNS.hostname(i).c_str(), ip.toString().c_str(), port);
+    Serial.println("--------------------------------------------------");
+    Serial.printf("[mDNS THÀNH CÔNG] Tim thay %d dich vu MQTT Broker!\n", count);
+    Serial.printf(" -> Broker IP   : %s\n", mqttBrokerIP.toString().c_str());
+    Serial.printf(" -> Broker Port : %d\n", mqttBrokerPort);
+    Serial.println("--------------------------------------------------");
 
-      if (ip != IPAddress(0, 0, 0, 0) && port > 0) {
-        mqttBrokerIP = ip;
-        mqttBrokerPort = port;
-        mqttBrokerFound = true;
-        saveStoredMQTT(mqttBrokerIP.toString(), mqttBrokerPort);
-        Serial.println("[mDNS] >>> TÌM THẤY MQTT BROKER THỰC TẾ THÀNH CÔNG! <<<");
-        return true;
-      }
-    }
+    saveMQTTConfigToNVS(mqttBrokerIP.toString(), mqttBrokerPort);
+    notifyBleStatus("mdns_discovered", "broker", mqttBrokerIP.toString().c_str(), "port", String(mqttBrokerPort).c_str());
+    return true;
   }
 
-  if (!mqttBrokerFound && strlen(FALLBACK_MQTT_IP) > 0) {
-    if (mqttBrokerIP.fromString(FALLBACK_MQTT_IP)) {
-      mqttBrokerPort = DEFAULT_MQTT_PORT;
-      Serial.printf("[mDNS] Sử dụng IP fallback: %s:%d\n", FALLBACK_MQTT_IP, mqttBrokerPort);
-      return true;
-    }
-  }
-
-  Serial.println("[mDNS] Chưa tìm thấy Broker, sẽ tự động thử lại sau...");
+  Serial.println("[mDNS CẢNH BÁO] Khong tim thay MQTT qua mDNS. Dung Fallback IP:");
+  mqttBrokerIP.fromString(FALLBACK_MQTT_IP);
+  mqttBrokerPort = DEFAULT_MQTT_PORT;
+  Serial.printf(" -> Fallback Broker IP: %s:%d\n", FALLBACK_MQTT_IP, DEFAULT_MQTT_PORT);
   return false;
 }
 
+bool discoverMQTT() {
+  return discoverMQTTBroker();
+}
+
 // ============================================================
-// CONNECT MQTT
+// CONNECT MQTT (CHUẨN SYNA / HESTA)
 // ============================================================
 bool connectMQTT() {
   if (WiFi.status() != WL_CONNECTED) return false;
 
-  if (!mqttBrokerFound) {
-    if (!discoverMQTT()) return false;
+  if (!mqttBrokerFound && mqttBrokerIP == INADDR_NONE) {
+    discoverMQTTBroker();
   }
 
   mqttClient.setServer(mqttBrokerIP, mqttBrokerPort);
   mqttClient.setCallback(mqttCallback);
-  mqttClient.setBufferSize(1024);
-
-  String clientId = "SYNA-HUB-" + String((uint32_t)ESP.getEfuseMac(), HEX);
-  String willTopic = "hesta/nodes/" + currentNodeId + "/devices/" + String(AC_DEVICE_ID) + "/status";
-  String willMsg   = "{\"deviceId\":\"" + String(AC_DEVICE_ID) + "\",\"status\":\"OFFLINE\"}";
+  mqttClient.setBufferSize(2048);
+  mqttClient.setSocketTimeout(1); // Tránh để PubSubClient block loop() 15s khi broker offline
 
   Serial.println();
-  Serial.println("======================================");
-  Serial.printf("[MQTT] Đang kết nối tới %s:%d (Client ID: %s)\n",
-                mqttBrokerIP.toString().c_str(), mqttBrokerPort, clientId.c_str());
-  Serial.println("======================================");
+  Serial.printf("[MQTT] Dang ket noi toi Broker: %s:%d ...\n", mqttBrokerIP.toString().c_str(), mqttBrokerPort);
 
-  if (mqttClient.connect(clientId.c_str(), willTopic.c_str(), 1, true, willMsg.c_str())) {
-    Serial.println("[MQTT] KẾT NỐI MQTT THÀNH CÔNG!");
+  String clientId = "HESTA-IR-HUB-" + String((uint32_t)ESP.getEfuseMac(), HEX);
 
-    // Subscribe topics cho Máy Lạnh (AC)
-    String acSubWildcard = "hesta/nodes/+/devices/" + String(AC_DEVICE_ID) + "/command";
-    String acSubDirect   = "hesta/devices/" + String(AC_DEVICE_ID) + "/command";
-    String acSubNode     = "hesta/nodes/" + currentNodeId + "/devices/" + String(AC_DEVICE_ID) + "/command";
-    mqttClient.subscribe(acSubWildcard.c_str());
-    mqttClient.subscribe(acSubDirect.c_str());
-    mqttClient.subscribe(acSubNode.c_str());
+  // Chuẩn bị LWT (Last Will and Testament) topic cho node
+  String lwtTopic = "hesta/nodes/" + currentNodeId + "/status";
+  const char* lwtPayload = "OFFLINE";
 
-    // Subscribe topics cho TV
-    String tvSubWildcard = "hesta/nodes/+/devices/" + String(TV_DEVICE_ID) + "/command";
-    String tvSubDirect   = "hesta/devices/" + String(TV_DEVICE_ID) + "/command";
-    String tvSubNode     = "hesta/nodes/" + currentNodeId + "/devices/" + String(TV_DEVICE_ID) + "/command";
-    mqttClient.subscribe(tvSubWildcard.c_str());
-    mqttClient.subscribe(tvSubDirect.c_str());
-    mqttClient.subscribe(tvSubNode.c_str());
+  bool connected = false;
+  if (strlen(MQTT_USER) > 0) {
+    connected = mqttClient.connect(clientId.c_str(), MQTT_USER, MQTT_PASSWORD, lwtTopic.c_str(), 1, true, lwtPayload);
+  } else {
+    connected = mqttClient.connect(clientId.c_str(), lwtTopic.c_str(), 1, true, lwtPayload);
+  }
 
-    // Subscribe nhận mọi lệnh dưới Node hiện tại
+  if (connected) {
+    Serial.println("==================================================");
+    Serial.println("[MQTT] KET NOI BROKER THANH CONG!");
+    Serial.printf(" - Client ID: %s\n", clientId.c_str());
+    Serial.println("==================================================");
+
+    // Báo trạng thái Node Online
+    mqttClient.publish(lwtTopic.c_str(), "ONLINE", true);
+
+    // 1. Subscribe wildcard topic của Node chính
     String nodeWildcard = "hesta/nodes/" + currentNodeId + "/devices/+/command";
     String nodeCmdTopic = "hesta/nodes/" + currentNodeId + "/command";
-    mqttClient.subscribe(nodeWildcard.c_str());
-    mqttClient.subscribe(nodeCmdTopic.c_str());
+    mqttClient.subscribe(nodeWildcard.c_str(), 1);
+    mqttClient.subscribe(nodeCmdTopic.c_str(), 1);
 
-    Serial.printf("[MQTT] Subscribed AC topics: %s, %s\n", acSubWildcard.c_str(), acSubDirect.c_str());
-    Serial.printf("[MQTT] Subscribed TV topics: %s, %s\n", tvSubWildcard.c_str(), tvSubDirect.c_str());
-    Serial.printf("[MQTT] Subscribed Node wildcard: %s\n", nodeWildcard.c_str());
+    // 2. Subscribe wildcard cho từng Device ID (bất kể Node ID nào từ Backend/App gửi tới)
+    String subAcWild   = "hesta/nodes/+/devices/" + String(AC_DEVICE_ID) + "/command";
+    String subAcDirect = "hesta/devices/" + String(AC_DEVICE_ID) + "/command";
+    String subTvWild   = "hesta/nodes/+/devices/" + String(TV_DEVICE_ID) + "/command";
+    String subTvDirect = "hesta/devices/" + String(TV_DEVICE_ID) + "/command";
+    mqttClient.subscribe(subAcWild.c_str(), 1);
+    mqttClient.subscribe(subAcDirect.c_str(), 1);
+    mqttClient.subscribe(subTvWild.c_str(), 1);
+    mqttClient.subscribe(subTvDirect.c_str(), 1);
 
-    // Báo trạng thái ONLINE và State cho cả 2 thiết bị
+    Serial.printf("[MQTT SUB] %s\n", nodeWildcard.c_str());
+    Serial.printf("[MQTT SUB] %s\n", nodeCmdTopic.c_str());
+    Serial.printf("[MQTT SUB] %s\n", subAcWild.c_str());
+    Serial.printf("[MQTT SUB] %s\n", subTvWild.c_str());
+
+    // Báo trạng thái ONLINE cho cả 2 thiết bị
     publishStatus("ONLINE");
     publishTVStatus("ONLINE");
+
+    // Báo State ban đầu của AC và TV
     publishACState();
     publishTVState();
 
-    notifyBLE("{\"status\":\"mqtt_connected\"}");
+    // Gửi gói Node Discovery và Telemetry ban đầu
+    publishNodeDiscovery();
+    publishTelemetry();
+
+    notifyBleStatus("mqtt_connected");
     return true;
   } else {
-    Serial.printf("[MQTT] Kết nối thất bại, rc=%d\n", mqttClient.state());
-    mqttBrokerFound = false;
+    Serial.printf("[MQTT ERROR] Ket noi that bai, ma loi rc=%d. Thu lai sau...\n", mqttClient.state());
     return false;
   }
+}
+
+// ============================================================
+// NODE DISCOVERY (CHUẨN SYNA BACKEND)
+// ============================================================
+void publishNodeDiscovery() {
+  if (!mqttClient.connected()) return;
+
+  String topic = "hesta/nodes/" + currentNodeId + "/discovery";
+
+#if ARDUINOJSON_VERSION_MAJOR >= 7
+  JsonDocument doc;
+#else
+  DynamicJsonDocument doc(1536);
+#endif
+
+  doc["nodeId"]          = currentNodeId;
+  doc["deviceName"]      = DEVICE_HUB_NAME;
+  doc["firmwareVersion"] = FIRMWARE_VERSION;
+  doc["macAddress"]      = WiFi.macAddress();
+  doc["ipAddress"]       = WiFi.localIP().toString();
+  doc["status"]          = "ONLINE";
+
+  JsonArray devList = doc["devices"].to<JsonArray>();
+
+  // 1. Máy lạnh Daikin
+  JsonObject dAc = devList.add<JsonObject>();
+  dAc["deviceId"]    = AC_DEVICE_ID;
+  dAc["name"]        = "Máy lạnh Daikin";
+  dAc["type"]        = AC_DEVICE_TYPE;
+  dAc["power"]       = acPower;
+  dAc["temperature"] = currentTemp;
+  dAc["mode"]        = modeToString(currentMode);
+  dAc["fan"]         = fanToString(currentFan);
+  dAc["swing"]       = currentSwing;
+  dAc["gpio"]        = IR_LED_PIN;
+
+  // 2. Ti vi TCL
+  JsonObject dTv = devList.add<JsonObject>();
+  dTv["deviceId"]    = TV_DEVICE_ID;
+  dTv["name"]        = "TV TCL";
+  dTv["type"]        = TV_DEVICE_TYPE;
+  dTv["power"]       = tvPower;
+  dTv["mute"]        = tvMute;
+  dTv["volume"]      = tvVolume;
+  dTv["channel"]     = tvChannel;
+  dTv["gpio"]        = IR_LED_PIN;
+
+  char buf[1536];
+  serializeJson(doc, buf, sizeof(buf));
+  mqttClient.publish(topic.c_str(), buf, true);
+  Serial.printf("[MQTT DISCOVERY]: %s\n", buf);
 }
 
 // ============================================================
@@ -1761,20 +1914,35 @@ void handleSerial() {
   else if (lowerCmd == "status") {
     printStatus();
   }
+  else if (lowerCmd == "mode offline" || lowerCmd == "offline") {
+    offlineTestMode = true;
+    Serial.println("[MODE] Da chuyen sang che do TEST OFFLINE (bo qua mang).");
+  }
+  else if (lowerCmd == "mode online" || lowerCmd == "online") {
+    offlineTestMode = false;
+    Serial.println("[MODE] Da chuyen sang che do ONLINE. Dang ket noi mang...");
+    connectWiFi();
+    if (WiFi.status() == WL_CONNECTED) {
+      discoverMQTTBroker();
+      connectMQTT();
+    }
+  }
   else if (lowerCmd == "reset_wifi") {
     clearStoredWiFi();
+    WiFi.disconnect(true);
+    mqttClient.disconnect();
     Serial.println("[RESET]: Đã xóa cấu hình WiFi/MQTT trong NVS.");
   }
   else if (lowerCmd == "mdns") {
     Serial.println("[mDNS]: Kích hoạt tìm lại Broker...");
     mqttBrokerFound = false;
-    if (discoverMQTT()) connectMQTT();
+    if (discoverMQTTBroker()) connectMQTT();
   }
   else {
     Serial.println("Lệnh Serial không hợp lệ. Các lệnh hỗ trợ:");
     Serial.println("  [AC] : power, on, off, t16..t30, cool, heat, dry, fan, fauto, f1..f3, swing1, swing0, raw");
     Serial.println("  [TV] : tv power, tv on, tv off, tv vol_up, tv vol_down, tv mute, tv ch_up, tv 0..9, tv <button>");
-    Serial.println("  [HỆ THỐNG] : status, reset_wifi, mdns");
+    Serial.println("  [HỆ THỐNG] : status, reset_wifi, mdns, mode offline, mode online");
   }
 }
 
@@ -1782,6 +1950,7 @@ void printStatus() {
   Serial.println();
   Serial.println("================= TRẠNG THÁI HIỆN TẠI (COMBO HUB) =================");
   Serial.printf("Node ID       : %s\n", currentNodeId.c_str());
+  Serial.printf("Chế độ (Mode) : %s\n", offlineTestMode ? "TEST OFFLINE (SERIAL ONLY)" : "ONLINE (WIFI + MQTT)");
   Serial.printf("WiFi          : %s (IP: %s, RSSI: %d dBm)\n",
                 (WiFi.status() == WL_CONNECTED) ? "ĐÃ KẾT NỐI" : "CHƯA KẾT NỐI",
                 WiFi.localIP().toString().c_str(),
@@ -1790,7 +1959,7 @@ void printStatus() {
                 mqttBrokerIP.toString().c_str(),
                 mqttBrokerPort,
                 mqttClient.connected() ? "ĐÃ KẾT NỐI" : "MẤT KẾT NỐI");
-  Serial.printf("BLE Status    : %s (Name: %s)\n", bleClientConnected ? "APP ĐÃ KẾT NỐI" : "ĐANG PHÁT QUẢNG BÁ", BLE_DEVICE_NAME);
+  Serial.printf("BLE Status    : %s (Name: %s)\n", bleClientConnected ? "APP ĐÃ KẾT NỐI" : "ĐANG PHÁT QUẢNG BÁ", DEVICE_HUB_NAME);
   Serial.println("----------------- 1. MÁY LẠNH DAIKIN (AC) -----------------");
   Serial.printf("AC Device ID  : %s\n", AC_DEVICE_ID);
   Serial.printf("Nguồn (AC)    : %s\n", acPower ? "ĐANG BẬT (ON)" : "ĐANG TẮT (OFF)");
@@ -1815,13 +1984,15 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  Serial.println();
-  Serial.println("========================================================");
-  Serial.println("   HESTA SMART HOME - DAIKIN AC & TCL TV COMBO HUB     ");
+  Serial.println("\n====================================================================");
+  Serial.println("  HESTA / SYNA SMART HOME - DAIKIN AC & TCL TV COMBO HUB");
+  Serial.println("  NODE ID : " NODE_ID);
+  Serial.println("  FIRMWARE: " FIRMWARE_VERSION);
+  Serial.println("====================================================================");
   Serial.printf("   AC Device ID: %s\n", AC_DEVICE_ID);
   Serial.printf("   TV Device ID: %s\n", TV_DEVICE_ID);
   Serial.printf("   IR LED Pin  : %d (Shared 2N2222 Transistor)\n", IR_LED_PIN);
-  Serial.println("========================================================");
+  Serial.println("====================================================================");
 
   // Khởi động phần cứng IR
   ac.begin();
@@ -1830,64 +2001,82 @@ void setup() {
   // Nạp trạng thái AC, TV và cấu hình WiFi/MQTT đã lưu trong NVS
   loadStoredACState();
   loadStoredTVState();
-  loadStoredWiFi();
-  loadStoredMQTT();
+  loadNetworkConfigFromNVS();
 
-  // Khởi tạo phần cứng BLE Provisioning
-  startBLE();
+  // Kiểm tra chế độ chạy (Offline Test vs Online đầy đủ)
+  if (offlineTestMode) {
+    Serial.println("\n====================================================================");
+    Serial.println("[MODE] DANG CHAY CHE DO: TEST OFFLINE (SERIAL ONLY)");
+    Serial.println(" -> Da bo qua ket noi Wi-Fi, MQTT va BLE.");
+    Serial.println(" -> Go 'mode online' tren Serial de bat lai ket noi mang.");
+    Serial.println("====================================================================");
+  } else {
+    // Khởi tạo BLE Provisioning (hỗ trợ App SYNA)
+    startBLE();
 
-  // Nếu đã có thông tin WiFi lưu trong Flash, tự động kết nối
-  if (wifiSSID.length() > 0) {
-    shouldConnectWiFi = true;
+    // Kết nối Wi-Fi
+    connectWiFi();
+
+    // Dò tìm mDNS và kết nối MQTT Broker
+    if (WiFi.status() == WL_CONNECTED) {
+      discoverMQTTBroker();
+      connectMQTT();
+    }
   }
 
-  Serial.println("Sẵn sàng! Có thể điều khiển qua Backend MQTT, Web Server, BLE hoặc Serial.");
+  Serial.println("-> He thong da san sang nhan lenh qua MQTT, Web Server, BLE hoac Serial...\n");
   printStatus();
 }
 
 void loop() {
-  // 1. Phục vụ Web Server nội bộ (giao diện điều khiển TV & AC qua browser)
+  unsigned long now = millis();
+
+  // 1. Phục vụ Web Server nội bộ nếu WiFi đã kết nối
   if (WiFi.status() == WL_CONNECTED) {
     webServer.handleClient();
   }
 
-  // 2. Xử lý yêu cầu kết nối WiFi khi nhận từ BLE hoặc khởi động
-  if (shouldConnectWiFi) {
-    handleWiFiProvisioning();
-  }
-
-  // 3. Duy trì kết nối WiFi nếu đã từng cấu hình
-  if (WiFi.status() != WL_CONNECTED && wifiSSID.length() > 0) {
-    unsigned long now = millis();
-    if (now - lastWiFiReconnectAttempt > 15000) {
-      lastWiFiReconnectAttempt = now;
-      Serial.println("[WiFi] Mất kết nối, đang thử kết nối lại...");
-      WiFi.begin(wifiSSID.c_str(), wifiPassword.c_str());
-    }
-  }
-
-  // 4. Duy trì kết nối MQTT nếu WiFi đã sẵn sàng
-  if (WiFi.status() == WL_CONNECTED) {
-    if (!mqttClient.connected()) {
-      unsigned long now = millis();
-      if (now - lastMqttReconnectAttempt > 10000) {
-        lastMqttReconnectAttempt = now;
-        Serial.println("[MQTT] Đang thử kết nối lại MQTT...");
+  // 2. Quản lý mạng khi KHÔNG ở chế độ Offline Test Mode
+  if (!offlineTestMode) {
+    // 2.1 Kiểm tra cờ kết nối Wi-Fi khi nhận thông tin từ BLE App
+    if (shouldConnectWiFi) {
+      shouldConnectWiFi = false;
+      if (connectWiFi()) {
+        discoverMQTTBroker();
         connectMQTT();
       }
-    } else {
-      mqttClient.loop();
+    }
 
-      // Gửi Telemetry định kỳ mỗi 60 giây cho cả AC và TV
-      unsigned long now = millis();
-      if (now - lastTelemetryPublish > 60000) {
-        lastTelemetryPublish = now;
-        publishTelemetry();
+    // 2.2 Tự động kết nối lại Wi-Fi nếu bị rớt mạng
+    if (WiFi.status() != WL_CONNECTED) {
+      if (now - lastWiFiReconnectAttempt >= 10000) {
+        lastWiFiReconnectAttempt = now;
+        Serial.println("[WIFI AUTO-RECONNECT] Dang thu ket noi lai Wi-Fi...");
+        if (WiFi.reconnect()) {
+          Serial.println("[WIFI AUTO-RECONNECT] Da ket noi lai WiFi!");
+        }
+      }
+    } else {
+      // 2.3 Quản lý kết nối MQTT Broker
+      if (!mqttClient.connected()) {
+        if (now - lastMqttReconnectAttempt >= 5000) {
+          lastMqttReconnectAttempt = now;
+          Serial.println("[MQTT AUTO-RECONNECT] Mat ket noi MQTT, dang thu ket noi lai...");
+          connectMQTT();
+        }
+      } else {
+        mqttClient.loop();
+
+        // 2.4 Gửi Telemetry định kỳ mỗi 30 giây cho cả AC và TV
+        if (now - lastTelemetryPublish >= TELEMETRY_INTERVAL_MS) {
+          lastTelemetryPublish = now;
+          publishTelemetry();
+        }
       }
     }
   }
 
-  // 5. Lắng nghe lệnh điều khiển Serial trực tiếp
+  // 3. Lắng nghe lệnh điều khiển Serial trực tiếp
   handleSerial();
 
   delay(10);

@@ -6,13 +6,14 @@
  * 
  * 1. THÔNG TIN HỆ THỐNG (ĐỊNH DANH BACKEND HESTA):
  * ----------------------------------------------------------------------------------------------------
- * - NODE ID      : 32442d7f-dfcf-4b2f-a380-adba32876cec
- * - DEVICE LED 1 : 19f79c42-afc1-4796-a48c-8d076ea45b65 (Đèn 1 - GPIO 4)
- * - DEVICE LED 2 : 98ae5452-250c-44c6-8b1a-fac08b2fc716 (Đèn 2 - GPIO 5)
- * - DEVICE LED 3 : c8186ca5-ff09-486c-bc56-ac75ef85e6d9 (Đèn 3 - GPIO 7)
- * - DEVICE LED 4 : c968b5c4-80d1-4aec-abef-cc52876a6da5 (Đèn 4 - GPIO 8)
- * - DEVICE CỔNG  : 2d566d0a-f7d6-4fac-a0bf-18912da4ab28 (Cổng trượt/cổng lùa - L298N Motor A)
- * - DEVICE CỬA CUỐN: c77b64a6-e163-44eb-83d2-431de5eb8f43 (Cửa cuốn - L298N Motor B)
+ * - NODE ID        : 32442d7f-dfcf-4b2f-a380-adba32876cec
+ * - DEVICE LED 1   : 19f79c42-afc1-4796-a48c-8d076ea45b65 -> Tên: Đèn phòng bếp (LED 1 - GPIO 4) | Vị trí: Phòng bếp
+ * - DEVICE LED 2   : 98ae5452-250c-44c6-8b1a-fac08b2fc716 -> Tên: Đèn chiếu TV (LED 2 - GPIO 5) | Vị trí: Phòng khách
+ * - DEVICE LED 3   : c8186ca5-ff09-486c-bc56-ac75ef85e6d9 -> Tên: Đèn phòng ngủ của con (LED 3 - GPIO 7) | Vị trí: Phòng ngủ của con
+ * - DEVICE LED 4   : c968b5c4-80d1-4aec-abef-cc52876a6da5 -> Tên: Đèn ngủ master (LED 4 - GPIO 8) | Vị trí: Phòng ngủ master
+ * - DEVICE LED RGB : 6d3d6ba5-867a-42ef-84c8-d39b589450a5 -> Tên: Đèn LED RGB (Đổi màu & Tăng giảm độ sáng) | Vị trí: Phòng khách
+ * - DEVICE CỔNG    : 2d566d0a-f7d6-4fac-a0bf-18912da4ab28 -> Tên: Cổng trượt / Rèm phòng ngủ (Motor A - L298N) | Vị trí: Cổng ngoài / Phòng ngủ master
+ * - DEVICE CỬA CUỐN: c77b64a6-e163-44eb-83d2-431de5eb8f43 -> Tên: Cửa cuốn (Motor B - L298N) | Vị trí: Garage
  * 
  * 2. NGUYÊN LÝ HOẠT ĐỘNG & SƠ ĐỒ ĐẤU NỐI PHẦN CỨNG:
  * ----------------------------------------------------------------------------------------------------
@@ -51,17 +52,30 @@
 
 #define NUM_LEDS 4
 
+// Thiết bị: Đèn phòng bếp | Vị trí: Phòng bếp (GPIO 4 - MOSFET PWM)
 #define DEVICE_ID_LED1 "19f79c42-afc1-4796-a48c-8d076ea45b65"
+
+// Thiết bị: Đèn chiếu TV | Vị trí: Phòng khách (GPIO 5 - MOSFET PWM)
 #define DEVICE_ID_LED2 "98ae5452-250c-44c6-8b1a-fac08b2fc716"
+
+// Thiết bị: Đèn phòng ngủ của con | Vị trí: Phòng ngủ của con (GPIO 7 - MOSFET PWM)
 #define DEVICE_ID_LED3 "c8186ca5-ff09-486c-bc56-ac75ef85e6d9"
+
+// Thiết bị: Đèn ngủ master | Vị trí: Phòng ngủ master (GPIO 8 - MOSFET PWM)
 #define DEVICE_ID_LED4 "c968b5c4-80d1-4aec-abef-cc52876a6da5"
 
-// Thiết bị Cổng trượt & Cửa cuốn
+// Thiết bị: Đèn LED RGB (Đổi màu & Tăng giảm độ sáng) | Vị trí: Phòng khách (Hắt trần / Trang trí TV)
+#define DEVICE_ID_LED_RGB       "6d3d6ba5-867a-42ef-84c8-d39b589450a5"
+
+// Thiết bị: Cổng trượt / Rèm phòng ngủ | Vị trí: Cổng ngoài / Phòng ngủ master (L298N Motor A)
 #define GATE_DEVICE_ID          "2d566d0a-f7d6-4fac-a0bf-18912da4ab28"
+
+// Thiết bị: Cửa cuốn | Vị trí: Garage (L298N Motor B)
 #define ROLLING_DOOR_DEVICE_ID  "c77b64a6-e163-44eb-83d2-431de5eb8f43"
 
-#define DEVICE_TYPE_LIGHT       "LIGHT"
-#define DEVICE_TYPE_GATE        "CURTAIN"
+#define DEVICE_TYPE_LIGHT        "LIGHT"
+#define DEVICE_TYPE_LED_RGB      "LED_RGB"
+#define DEVICE_TYPE_GATE         "CURTAIN"
 #define DEVICE_TYPE_ROLLING_DOOR "ROLLING_DOOR"
 
 // ====================================================================================================
@@ -79,14 +93,39 @@ bool offlineTestMode = OFFLINE_TEST_MODE;
 #define PIN_LED3 7
 #define PIN_LED4 8
 
+// --- 2.4 4 NÚT NHẤN NHẢ (PUSH BUTTONS) - INPUT_PULLUP ---
+// Đấu nối: 1 đầu vào chân GPIO, 1 đầu vào chân GND (Dùng điện trở kéo lên nội của ESP32, KHÔNG CẦN TRỞ NGOÀI)
+#define NUM_BUTTONS 4
+#define PIN_BUTTON_1 1    // Nút 1: Đảo trạng thái Đèn 1 (GPIO 4)
+#define PIN_BUTTON_2 2    // Nút 2: Đảo trạng thái Đèn 2 (GPIO 5)
+#define PIN_BUTTON_3 18   // Nút 3: Đảo trạng thái Đèn 3 (GPIO 7)
+#define PIN_BUTTON_4 47   // Nút 4: Đảo trạng thái Đèn 4 (GPIO 8)
+
+#define BUTTON_DEBOUNCE_MS 50 // Thời gian chống rung phím (50ms)
+
+// --- 2.5 ĐÈN LED RGB (CHÂN R, G, B ĐIỀU RỘNG XUNG PWM) ---
+#define PIN_RGB_RED    6    // Chân PWM màu Đỏ (Red)
+#define PIN_RGB_GREEN  9    // Chân PWM màu Xanh Lá (Green)
+#define PIN_RGB_BLUE   21   // Chân PWM màu Xanh Dương (Blue)
+
+// Cực tính LED RGB:
+// true : Module LED Dương chung (Common Anode 5V/3.3V) -> Mức LOW = Sáng, Mức HIGH = Tối
+// false: Module LED Âm chung (Common Cathode GND) hoặc qua Transistor đệm -> Mức HIGH = Sáng
+#define RGB_COMMON_ANODE true
+
+// Tần số lấy mẫu Sigma-Delta cho LED RGB (1220 - 312500 Hz). LED RGB KHÔNG dùng LEDC để chừa kênh cho motor.
+#define RGB_SDM_FREQ 312500
+
 bool mosfetActiveHigh        = true;
 
 #define PWM_FREQ       500
 #define PWM_RESOLUTION 8
 #define PWM_MAX_DUTY   255
 
-bool enableSmoothFading      = true;
-#define FADE_SPEED           0.18f
+bool enableSmoothFading         = true;
+#define FADE_SPEED              0.18f
+#define BEDROOM_FADE_IN_MS      2500  // Thời gian fade in chậm cho 2 phòng ngủ (LED 3, LED 4) (ms)
+#define OTHER_FADE_IN_MS        1000   // Thời gian fade in ngắn hơn cho phòng bếp & đèn chiếu TV (LED 1, LED 2) (ms)
 
 // --- 2.2 MOTOR A (CỔNG TRƯỢT / CỔNG LÙA - SLIDING GATE - L298N) ---
 #define PIN_GATE_IN1             10
@@ -115,7 +154,7 @@ bool enableSmoothFading      = true;
 #define DEFAULT_WIFI_SSID     "Dung Home T3"
 #define DEFAULT_WIFI_PASSWORD "123lyvanphuc"
 
-#define FALLBACK_MQTT_IP      "192.168.88.120"
+#define FALLBACK_MQTT_IP      "192.168.137.107"
 #define DEFAULT_MQTT_PORT     1883
 #define MQTT_USER             ""
 #define MQTT_PASSWORD         ""
@@ -137,6 +176,13 @@ const String TOPIC_DOOR_STATE      = "hesta/nodes/" NODE_ID "/devices/" ROLLING_
 const String TOPIC_DOOR_ACK        = "hesta/nodes/" NODE_ID "/devices/" ROLLING_DOOR_DEVICE_ID "/ack";
 const String TOPIC_DOOR_TELEMETRY  = "hesta/nodes/" NODE_ID "/devices/" ROLLING_DOOR_DEVICE_ID "/telemetry";
 
+// Topics chuyên biệt cho Đèn LED RGB
+const String TOPIC_RGB_COMMAND    = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/command";
+const String TOPIC_RGB_STATE      = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/state";
+const String TOPIC_RGB_ACK        = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/ack";
+const String TOPIC_RGB_TELEMETRY  = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/telemetry";
+const String TOPIC_RGB_STATUS     = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/status";
+
 // ====================================================================================================
 // 4. CẤU HÌNH BLE PROVISIONING (CHUẨN HỆ SINH THÁI SYNA MOBILE APP)
 // ====================================================================================================
@@ -156,13 +202,18 @@ struct LedChannel {
     uint8_t lastBrightness;   // Độ sáng nhớ trước khi tắt (để khi bật lại khôi phục đúng)
     float currentDuty;        // Giá trị PWM hiện tại (0.0 - 255.0) đang xuất ra chân
     float targetDuty;         // Giá trị PWM đích cần đạt tới
+    float fadeStartDuty;      // Giá trị PWM tại thời điểm bắt đầu fade in
+    unsigned long fadeStartTime; // Thời điểm bắt đầu fade in (ms)
+    uint16_t fadeInDurationMs; // Thời lượng fade in cấu hình riêng cho từng đèn (ms)
+    uint16_t fadeDurationMs;  // Thời lượng fade in thực tế cho lần chuyển trạng thái hiện tại (ms)
+    bool slowFadeIn;          // Bật true khi đèn đang thực hiện fade in ease-in
 };
 
 LedChannel leds[NUM_LEDS] = {
-    {DEVICE_ID_LED1, "LED_1", PIN_LED1, 0, false, 100, 100, 0.0f, 0.0f},
-    {DEVICE_ID_LED2, "LED_2", PIN_LED2, 1, false, 100, 100, 0.0f, 0.0f},
-    {DEVICE_ID_LED3, "LED_3", PIN_LED3, 2, false, 100, 100, 0.0f, 0.0f},
-    {DEVICE_ID_LED4, "LED_4", PIN_LED4, 3, false, 100, 100, 0.0f, 0.0f}
+    {DEVICE_ID_LED1, "LED_1", PIN_LED1, 0, false, 100, 100, 0.0f, 0.0f, 0.0f, 0, OTHER_FADE_IN_MS,   0, false}, // Đèn phòng bếp | Fade in ngắn
+    {DEVICE_ID_LED2, "LED_2", PIN_LED2, 1, false, 100, 100, 0.0f, 0.0f, 0.0f, 0, OTHER_FADE_IN_MS,   0, false}, // Đèn chiếu TV | Fade in ngắn
+    {DEVICE_ID_LED3, "LED_3", PIN_LED3, 2, false, 100, 100, 0.0f, 0.0f, 0.0f, 0, BEDROOM_FADE_IN_MS, 0, false}, // Đèn phòng ngủ của con | Fade in chậm
+    {DEVICE_ID_LED4, "LED_4", PIN_LED4, 3, false, 100, 100, 0.0f, 0.0f, 0.0f, 0, BEDROOM_FADE_IN_MS, 0, false}  // Đèn ngủ master | Fade in chậm
 };
 
 // --- TRẠNG THÁI CỔNG TRƯỢT VÀ CỬA CUỐN ---
@@ -224,12 +275,51 @@ unsigned long lastFadingUpdate = 0;
 // Chu kỳ gửi Telemetry định kỳ (mỗi 30 giây)
 const unsigned long TELEMETRY_INTERVAL_MS = 30000;
 
+// --- CẤU TRÚC QUẢN LÝ 4 NÚT NHẤN NHẢ ---
+struct PushButton {
+    uint8_t pin;
+    uint8_t lastState;
+    unsigned long lastChangeTime;
+};
+
+PushButton buttons[NUM_BUTTONS] = {
+    {PIN_BUTTON_1, HIGH, 0},
+    {PIN_BUTTON_2, HIGH, 0},
+    {PIN_BUTTON_3, HIGH, 0},
+    {PIN_BUTTON_4, HIGH, 0}
+};
+
+// --- CẤU TRÚC QUẢN LÝ ĐÈN LED RGB ---
+struct RgbChannel {
+    const char* deviceId;
+    const char* label;
+    bool power;
+    uint8_t brightness;
+    uint8_t lastBrightness;
+    uint8_t r;
+    uint8_t g;
+    uint8_t b;
+    String hex;
+};
+
+RgbChannel rgbLed = {
+    DEVICE_ID_LED_RGB,
+    "LED_RGB",
+    false,
+    100,
+    100,
+    255,
+    255,
+    255,
+    "#FFFFFF"
+};
+
 // ====================================================================================================
 // 7. NGUYÊN MẪU HÀM (FORWARD DECLARATIONS)
 // ====================================================================================================
 void initPWM();
 void writeHardwarePWM(uint8_t index, uint8_t duty);
-void updateLedTargetDuty(uint8_t index);
+void updateLedTargetDuty(uint8_t index, bool immediate = false);
 void setLedPower(uint8_t index, bool power, const char* commandId = nullptr);
 void setLedBrightness(uint8_t index, int brightnessPercent, const char* commandId = nullptr);
 void toggleLed(uint8_t index, const char* commandId = nullptr);
@@ -237,6 +327,24 @@ void stepBrightness(uint8_t index, int delta, const char* commandId = nullptr);
 void setAllPower(bool power, const char* commandId = nullptr);
 void setAllBrightness(int brightnessPercent, const char* commandId = nullptr);
 void stepAllBrightness(int delta, const char* commandId = nullptr);
+
+void initButtons();
+void handleButtons();
+
+void initRgbPWM();
+void applyRgbColor();
+void setRgbPower(bool power, const char* commandId = nullptr);
+void toggleRgbPower(const char* commandId = nullptr);
+void setRgbBrightness(int brightnessPercent, const char* commandId = nullptr);
+void stepRgbBrightness(int delta, const char* commandId = nullptr);
+void setRgbColor(uint8_t r, uint8_t g, uint8_t b, const char* commandId = nullptr);
+void setRgbHex(const String& hexCode, const char* commandId = nullptr);
+void saveRgbStateToNVS();
+void loadRgbStateFromNVS();
+void publishRgbState(const char* commandId = nullptr);
+void publishRgbAck(const char* commandId, const char* statusMsg = "SUCCESS");
+void publishRgbTelemetry();
+void publishRgbStatus(const char* status = "ONLINE");
 
 int findLedIndexByDeviceId(const String& deviceId);
 void saveLedStateToNVS(uint8_t index);
@@ -328,20 +436,46 @@ void writeHardwarePWM(uint8_t index, uint8_t duty) {
 /**
  * Tính toán duty mục tiêu dựa trên power và brightness
  */
-void updateLedTargetDuty(uint8_t index) {
+void updateLedTargetDuty(uint8_t index, bool immediate) {
     if (index >= NUM_LEDS) return;
 
-    if (!leds[index].power || leds[index].brightness == 0) {
-        leds[index].targetDuty = 0.0f;
-    } else {
+    float newTarget = 0.0f;
+    if (leds[index].power && leds[index].brightness > 0) {
         // Map 0% -> 100% sang 0 -> 255
-        leds[index].targetDuty = (float)((uint16_t)leds[index].brightness * PWM_MAX_DUTY) / 100.0f;
+        newTarget = (float)((uint16_t)leds[index].brightness * PWM_MAX_DUTY) / 100.0f;
     }
 
-    if (!enableSmoothFading) {
-        leds[index].currentDuty = leds[index].targetDuty;
+    if (!enableSmoothFading || immediate) {
+        leds[index].targetDuty = newTarget;
+        leds[index].currentDuty = newTarget;
+        leds[index].fadeStartDuty = newTarget;
+        leds[index].slowFadeIn = false;
         writeHardwarePWM(index, (uint8_t)round(leds[index].currentDuty));
+        return;
     }
+
+    // Khi bật / tăng sáng sẽ dùng fade in ease-in theo thời lượng riêng của từng đèn
+    if (newTarget > leds[index].currentDuty + 0.5f) {
+        if (fabs(newTarget - leds[index].targetDuty) < 0.01f && leds[index].slowFadeIn) {
+            return;
+        }
+        uint16_t baseFadeInMs = leds[index].fadeInDurationMs;
+        leds[index].fadeStartDuty = leds[index].currentDuty;
+        leds[index].targetDuty = newTarget;
+        leds[index].fadeStartTime = millis();
+        if (leds[index].currentDuty < 1.0f) {
+            leds[index].fadeDurationMs = baseFadeInMs;
+        } else {
+            float ratio = (newTarget - leds[index].currentDuty) / (float)PWM_MAX_DUTY;
+            uint16_t scaled = (uint16_t)round(ratio * (float)baseFadeInMs);
+            leds[index].fadeDurationMs = (scaled < 200) ? 200 : scaled;
+        }
+        leds[index].slowFadeIn = true;
+        return;
+    }
+
+    leds[index].slowFadeIn = false;
+    leds[index].targetDuty = newTarget;
 }
 
 /**
@@ -350,7 +484,23 @@ void updateLedTargetDuty(uint8_t index) {
 void updateSmoothFading() {
     if (!enableSmoothFading) return;
 
+    unsigned long now = millis();
+
     for (int i = 0; i < NUM_LEDS; i++) {
+        if (leds[i].slowFadeIn) {
+            unsigned long elapsed = now - leds[i].fadeStartTime;
+            if (leds[i].fadeDurationMs == 0 || elapsed >= leds[i].fadeDurationMs) {
+                leds[i].currentDuty = leds[i].targetDuty;
+                leds[i].slowFadeIn = false;
+            } else {
+                float t = (float)elapsed / (float)leds[i].fadeDurationMs;
+                float eased = t * t; // Ease-in giúp vùng PWM thấp sáng lên êm dịu
+                leds[i].currentDuty = leds[i].fadeStartDuty + (leds[i].targetDuty - leds[i].fadeStartDuty) * eased;
+            }
+            writeHardwarePWM(i, (uint8_t)round(leds[i].currentDuty));
+            continue;
+        }
+
         if (fabs(leds[i].currentDuty - leds[i].targetDuty) > 0.5f) {
             leds[i].currentDuty += (leds[i].targetDuty - leds[i].currentDuty) * FADE_SPEED;
             writeHardwarePWM(i, (uint8_t)round(leds[i].currentDuty));
@@ -438,6 +588,378 @@ void setLedBrightness(uint8_t index, int brightnessPercent, const char* commandI
 void toggleLed(uint8_t index, const char* commandId) {
     if (index >= NUM_LEDS) return;
     setLedPower(index, !leds[index].power, commandId);
+}
+
+/**
+ * Khởi tạo 4 nút nhấn nhả
+ */
+void initButtons() {
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        pinMode(buttons[i].pin, INPUT_PULLUP);
+        buttons[i].lastState = digitalRead(buttons[i].pin);
+        buttons[i].lastChangeTime = 0;
+    }
+    Serial.println("--------------------------------------------------");
+    Serial.println("[BUTTON] Khoi tao 4 nut nhan nha (INPUT_PULLUP):");
+    Serial.printf(" - Nut 1 (GPIO %2d) -> Dao trang thai Den 1 (%s)\n", PIN_BUTTON_1, leds[0].deviceId);
+    Serial.printf(" - Nut 2 (GPIO %2d) -> Dao trang thai Den 2 (%s)\n", PIN_BUTTON_2, leds[1].deviceId);
+    Serial.printf(" - Nut 3 (GPIO %2d) -> Dao trang thai Den 3 (%s)\n", PIN_BUTTON_3, leds[2].deviceId);
+    Serial.printf(" - Nut 4 (GPIO %2d) -> Dao trang thai Den 4 (%s)\n", PIN_BUTTON_4, leds[3].deviceId);
+    Serial.println("--------------------------------------------------");
+}
+
+/**
+ * Quét trạng thái và chống rung (debounce) cho 4 nút nhấn nhả
+ */
+void handleButtons() {
+    unsigned long now = millis();
+    for (int i = 0; i < NUM_BUTTONS; i++) {
+        uint8_t reading = digitalRead(buttons[i].pin);
+
+        if (reading != buttons[i].lastState) {
+            if (now - buttons[i].lastChangeTime >= BUTTON_DEBOUNCE_MS) {
+                buttons[i].lastState = reading;
+                buttons[i].lastChangeTime = now;
+
+                // Nút nhấn nhả nối INPUT_PULLUP: khi nhấn xuống chân nối GND -> mức LOW
+                if (reading == LOW) {
+                    Serial.printf("\n>>> [NUT NHAN %d] DA DUOC NHAN! -> Dao trang thai Den %d <<<\n", i + 1, i + 1);
+                    toggleLed(i);
+                }
+            }
+        }
+    }
+}
+
+// ====================================================================================================
+// 8b. ĐIỀU KHIỂN ĐÈN LED RGB (MÀU SẮC, ĐỘ SÁNG, PWM & TRẠNG THÁI)
+// ====================================================================================================
+
+/**
+ * Khởi tạo PWM cho 3 kênh LED RGB
+ */
+void initRgbPWM() {
+    pinMode(PIN_RGB_RED, OUTPUT);
+    pinMode(PIN_RGB_GREEN, OUTPUT);
+    pinMode(PIN_RGB_BLUE, OUTPUT);
+
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    // QUAN TRỌNG: ESP32-S3 chỉ có 8 kênh LEDC. 4 đèn MOSFET + 2 motor (ENA/ENB) đã dùng 6 kênh,
+    // nếu LED RGB dùng thêm 3 kênh LEDC thì kênh thứ 9 (ENB cửa cuốn) bị từ chối
+    // ("No more LEDC channels available!") -> motor cửa cuốn không bao giờ quay.
+    // Vì vậy LED RGB dùng bộ điều chế Sigma-Delta (SDM, 8 kênh riêng) thay cho LEDC.
+    bool okR = sigmaDeltaAttach(PIN_RGB_RED, RGB_SDM_FREQ);
+    bool okG = sigmaDeltaAttach(PIN_RGB_GREEN, RGB_SDM_FREQ);
+    bool okB = sigmaDeltaAttach(PIN_RGB_BLUE, RGB_SDM_FREQ);
+    if (!okR || !okG || !okB) {
+        Serial.printf("[RGB INIT ERROR] Khong gan duoc Sigma-Delta: R=%d G=%d B=%d\n", okR, okG, okB);
+    }
+#endif
+
+    applyRgbColor();
+    Serial.printf("[RGB INIT] Da khoi tao LED RGB (Sigma-Delta): R=GPIO %d, G=GPIO %d, B=GPIO %d | Anode=%s\n",
+                  PIN_RGB_RED, PIN_RGB_GREEN, PIN_RGB_BLUE, RGB_COMMON_ANODE ? "YES" : "NO");
+}
+
+/**
+ * Tính toán duty cycle dựa trên màu sắc (R, G, B), độ sáng (Brightness) và xuất ra chân GPIO
+ */
+void applyRgbColor() {
+    uint8_t effectiveBri = rgbLed.power ? rgbLed.brightness : 0;
+
+    uint16_t scaledR = ((uint16_t)rgbLed.r * effectiveBri) / 100;
+    uint16_t scaledG = ((uint16_t)rgbLed.g * effectiveBri) / 100;
+    uint16_t scaledB = ((uint16_t)rgbLed.b * effectiveBri) / 100;
+
+    uint8_t dutyR = (uint8_t)scaledR;
+    uint8_t dutyG = (uint8_t)scaledG;
+    uint8_t dutyB = (uint8_t)scaledB;
+
+    if (RGB_COMMON_ANODE) {
+        dutyR = 255 - dutyR;
+        dutyG = 255 - dutyG;
+        dutyB = 255 - dutyB;
+    }
+
+#if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
+    sigmaDeltaWrite(PIN_RGB_RED, dutyR);
+    sigmaDeltaWrite(PIN_RGB_GREEN, dutyG);
+    sigmaDeltaWrite(PIN_RGB_BLUE, dutyB);
+#else
+    analogWrite(PIN_RGB_RED, dutyR);
+    analogWrite(PIN_RGB_GREEN, dutyG);
+    analogWrite(PIN_RGB_BLUE, dutyB);
+#endif
+}
+
+/**
+ * Bật / Tắt nguồn LED RGB
+ */
+void setRgbPower(bool power, const char* commandId) {
+    rgbLed.power = power;
+    if (power) {
+        if (rgbLed.brightness == 0) {
+            rgbLed.brightness = (rgbLed.lastBrightness > 0) ? rgbLed.lastBrightness : 100;
+        }
+    } else {
+        if (rgbLed.brightness > 0) {
+            rgbLed.lastBrightness = rgbLed.brightness;
+        }
+    }
+
+    applyRgbColor();
+    saveRgbStateToNVS();
+
+    Serial.printf("[RGB] Nguon: %s | Do sang: %d%% | Mau: (%d, %d, %d) / %s\n",
+                  rgbLed.power ? "BAT (ON)" : "TAT (OFF)",
+                  rgbLed.brightness, rgbLed.r, rgbLed.g, rgbLed.b, rgbLed.hex.c_str());
+
+    publishRgbState(commandId);
+    if (commandId != nullptr && strlen(commandId) > 0) {
+        publishRgbAck(commandId, "SUCCESS");
+    }
+    publishRgbTelemetry();
+}
+
+/**
+ * Đảo trạng thái Bật / Tắt LED RGB
+ */
+void toggleRgbPower(const char* commandId) {
+    setRgbPower(!rgbLed.power, commandId);
+}
+
+/**
+ * Đặt độ sáng LED RGB (0% - 100%)
+ */
+void setRgbBrightness(int brightnessPercent, const char* commandId) {
+    brightnessPercent = constrain(brightnessPercent, 0, 100);
+    rgbLed.brightness = (uint8_t)brightnessPercent;
+    if (brightnessPercent > 0) {
+        rgbLed.power = true;
+        rgbLed.lastBrightness = (uint8_t)brightnessPercent;
+    } else {
+        rgbLed.power = false;
+    }
+
+    applyRgbColor();
+    saveRgbStateToNVS();
+
+    Serial.printf("[RGB] Set Do sang: %d%% (%s)\n", rgbLed.brightness, rgbLed.power ? "ON" : "OFF");
+
+    publishRgbState(commandId);
+    if (commandId != nullptr && strlen(commandId) > 0) {
+        publishRgbAck(commandId, "SUCCESS");
+    }
+    publishRgbTelemetry();
+}
+
+/**
+ * Tăng / Giảm độ sáng LED RGB theo bước
+ */
+void stepRgbBrightness(int delta, const char* commandId) {
+    int currentBri = rgbLed.power ? (int)rgbLed.brightness : 0;
+    if (!rgbLed.power && delta > 0) {
+        currentBri = (rgbLed.lastBrightness > 0) ? (int)rgbLed.lastBrightness : 10;
+    }
+    int newBri = constrain(currentBri + delta, 0, 100);
+    setRgbBrightness(newBri, commandId);
+}
+
+/**
+ * Đặt màu sắc RGB (r, g, b: 0 - 255)
+ */
+void setRgbColor(uint8_t r, uint8_t g, uint8_t b, const char* commandId) {
+    rgbLed.r = r;
+    rgbLed.g = g;
+    rgbLed.b = b;
+    rgbLed.power = true;
+    if (rgbLed.brightness == 0) {
+        rgbLed.brightness = (rgbLed.lastBrightness > 0) ? rgbLed.lastBrightness : 100;
+    }
+
+    char hexBuf[10];
+    snprintf(hexBuf, sizeof(hexBuf), "#%02X%02X%02X", r, g, b);
+    rgbLed.hex = String(hexBuf);
+
+    applyRgbColor();
+    saveRgbStateToNVS();
+
+    Serial.printf("[RGB] Set Color: R=%d, G=%d, B=%d (%s) | Do sang: %d%%\n",
+                  r, g, b, rgbLed.hex.c_str(), rgbLed.brightness);
+
+    publishRgbState(commandId);
+    if (commandId != nullptr && strlen(commandId) > 0) {
+        publishRgbAck(commandId, "SUCCESS");
+    }
+    publishRgbTelemetry();
+}
+
+/**
+ * Đặt màu sắc từ mã Hex (VD: "#FF5733" hoặc "00FF00")
+ */
+void setRgbHex(const String& hexCode, const char* commandId) {
+    String cleanHex = hexCode;
+    cleanHex.trim();
+    if (cleanHex.startsWith("#")) cleanHex.remove(0, 1);
+    if (cleanHex.length() == 6) {
+        uint8_t r = (uint8_t)strtol(cleanHex.substring(0, 2).c_str(), nullptr, 16);
+        uint8_t g = (uint8_t)strtol(cleanHex.substring(2, 4).c_str(), nullptr, 16);
+        uint8_t b = (uint8_t)strtol(cleanHex.substring(4, 6).c_str(), nullptr, 16);
+        setRgbColor(r, g, b, commandId);
+    } else {
+        Serial.printf("[RGB ERROR] Ma hex khong hop le: %s (Dinh dang chuan: #RRGGBB)\n", hexCode.c_str());
+    }
+}
+
+/**
+ * Lưu trạng thái LED RGB vào Flash NVS
+ */
+void saveRgbStateToNVS() {
+    preferences.begin("hesta_rgb", false);
+    preferences.putBool("power", rgbLed.power);
+    preferences.putUChar("bri", rgbLed.brightness);
+    preferences.putUChar("last_bri", rgbLed.lastBrightness);
+    preferences.putUChar("r", rgbLed.r);
+    preferences.putUChar("g", rgbLed.g);
+    preferences.putUChar("b", rgbLed.b);
+    preferences.end();
+}
+
+/**
+ * Khôi phục trạng thái LED RGB từ Flash NVS
+ */
+void loadRgbStateFromNVS() {
+    preferences.begin("hesta_rgb", true);
+    rgbLed.power          = preferences.getBool("power", false);
+    rgbLed.brightness     = preferences.getUChar("bri", 100);
+    rgbLed.lastBrightness = preferences.getUChar("last_bri", 100);
+    rgbLed.r              = preferences.getUChar("r", 255);
+    rgbLed.g              = preferences.getUChar("g", 255);
+    rgbLed.b              = preferences.getUChar("b", 255);
+    preferences.end();
+
+    char hexBuf[10];
+    snprintf(hexBuf, sizeof(hexBuf), "#%02X%02X%02X", rgbLed.r, rgbLed.g, rgbLed.b);
+    rgbLed.hex = String(hexBuf);
+
+    applyRgbColor();
+    Serial.printf("[NVS LOAD RGB] Nguon: %s | Do sang: %d%% | Mau: (%d, %d, %d) / %s\n",
+                  rgbLed.power ? "ON" : "OFF", rgbLed.brightness,
+                  rgbLed.r, rgbLed.g, rgbLed.b, rgbLed.hex.c_str());
+}
+
+/**
+ * Gửi trạng thái State của LED RGB lên MQTT
+ */
+void publishRgbState(const char* commandId) {
+    if (!mqttClient.connected()) return;
+
+    String topic = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/state";
+
+#if ARDUINOJSON_VERSION_MAJOR >= 7
+    JsonDocument doc;
+#else
+    DynamicJsonDocument doc(512);
+#endif
+
+    doc["nodeId"]     = NODE_ID;
+    doc["deviceId"]   = DEVICE_ID_LED_RGB;
+    doc["deviceType"] = DEVICE_TYPE_LED_RGB;
+    doc["power"]      = rgbLed.power;
+    doc["brightness"] = rgbLed.brightness;
+    doc["r"]          = rgbLed.r;
+    doc["g"]          = rgbLed.g;
+    doc["b"]          = rgbLed.b;
+    doc["hex"]        = rgbLed.hex;
+
+    JsonObject stateObj = doc["state"].to<JsonObject>();
+    stateObj["power"]      = rgbLed.power;
+    stateObj["brightness"] = rgbLed.brightness;
+    stateObj["r"]          = rgbLed.r;
+    stateObj["g"]          = rgbLed.g;
+    stateObj["b"]          = rgbLed.b;
+    stateObj["hex"]        = rgbLed.hex;
+    JsonObject colorObj    = stateObj["color"].to<JsonObject>();
+    colorObj["r"] = rgbLed.r;
+    colorObj["g"] = rgbLed.g;
+    colorObj["b"] = rgbLed.b;
+
+    char buffer[512];
+    serializeJson(doc, buffer, sizeof(buffer));
+    mqttClient.publish(topic.c_str(), buffer, true);
+    Serial.printf("[MQTT STATE -> RGB]: %s\n", buffer);
+}
+
+/**
+ * Gửi ACK cho lệnh của LED RGB
+ */
+void publishRgbAck(const char* commandId, const char* statusMsg) {
+    if (!mqttClient.connected() || commandId == nullptr || strlen(commandId) == 0) return;
+
+    String topic = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/ack";
+
+#if ARDUINOJSON_VERSION_MAJOR >= 7
+    JsonDocument doc;
+#else
+    DynamicJsonDocument doc(512);
+#endif
+
+    doc["commandId"]  = commandId;
+    doc["deviceId"]   = DEVICE_ID_LED_RGB;
+    doc["deviceType"] = DEVICE_TYPE_LED_RGB;
+    doc["status"]     = statusMsg;
+
+    JsonObject stateObj = doc["state"].to<JsonObject>();
+    stateObj["power"]      = rgbLed.power;
+    stateObj["brightness"] = rgbLed.brightness;
+    stateObj["r"]          = rgbLed.r;
+    stateObj["g"]          = rgbLed.g;
+    stateObj["b"]          = rgbLed.b;
+    stateObj["hex"]        = rgbLed.hex;
+
+    char buffer[512];
+    serializeJson(doc, buffer, sizeof(buffer));
+    mqttClient.publish(topic.c_str(), buffer, false);
+    Serial.printf("[MQTT ACK -> RGB]: %s\n", buffer);
+}
+
+/**
+ * Gửi Telemetry định kỳ cho LED RGB
+ */
+void publishRgbTelemetry() {
+    if (!mqttClient.connected()) return;
+
+    String topic = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/telemetry";
+
+#if ARDUINOJSON_VERSION_MAJOR >= 7
+    JsonDocument doc;
+#else
+    DynamicJsonDocument doc(512);
+#endif
+
+    doc["nodeId"]     = NODE_ID;
+    doc["deviceId"]   = DEVICE_ID_LED_RGB;
+    doc["deviceType"] = DEVICE_TYPE_LED_RGB;
+    doc["power"]      = rgbLed.power;
+    doc["brightness"] = rgbLed.brightness;
+    doc["r"]          = rgbLed.r;
+    doc["g"]          = rgbLed.g;
+    doc["b"]          = rgbLed.b;
+    doc["rssi"]       = WiFi.RSSI();
+    doc["uptime"]     = millis() / 1000;
+
+    char buffer[512];
+    serializeJson(doc, buffer, sizeof(buffer));
+    mqttClient.publish(topic.c_str(), buffer, false);
+}
+
+/**
+ * Gửi trạng thái Online / Offline cho LED RGB
+ */
+void publishRgbStatus(const char* status) {
+    if (!mqttClient.connected()) return;
+    String topic = "hesta/nodes/" NODE_ID "/devices/" DEVICE_ID_LED_RGB "/status";
+    mqttClient.publish(topic.c_str(), status, true);
 }
 
 /**
@@ -561,8 +1083,12 @@ void initMotorHardware() {
     digitalWrite(PIN_DOOR_IN4, LOW);
 
 #if ESP_ARDUINO_VERSION >= ESP_ARDUINO_VERSION_VAL(3, 0, 0)
-    ledcAttach(PIN_GATE_ENA, 1000, 8);
-    ledcAttach(PIN_DOOR_ENB, 1000, 8);
+    if (!ledcAttach(PIN_GATE_ENA, 1000, 8)) {
+        Serial.printf("[MOTOR INIT ERROR] Khong gan duoc PWM cho ENA (GPIO %d) - het kenh LEDC?\n", PIN_GATE_ENA);
+    }
+    if (!ledcAttach(PIN_DOOR_ENB, 1000, 8)) {
+        Serial.printf("[MOTOR INIT ERROR] Khong gan duoc PWM cho ENB (GPIO %d) - het kenh LEDC? Cua cuon se KHONG chay!\n", PIN_DOOR_ENB);
+    }
 #else
     ledcSetup(4, 1000, 8);
     ledcAttachPin(PIN_GATE_ENA, 4);
@@ -1030,10 +1556,7 @@ void loadAllStatesFromNVS() {
         leds[i].brightness     = preferences.getUChar(keyB, 100);
         leds[i].lastBrightness = preferences.getUChar(keyL, 100);
 
-        updateLedTargetDuty(i);
-        // Khởi động ban đầu: gán ngay duty thực tế để tránh nhấp nháy
-        leds[i].currentDuty = leds[i].targetDuty;
-        writeHardwarePWM(i, (uint8_t)round(leds[i].currentDuty));
+        updateLedTargetDuty(i, true);
     }
     preferences.end();
     Serial.println("[NVS] Da khoi phuc trang thai 5 den tu bo nho Flash NVS.");
@@ -1400,6 +1923,10 @@ void connectMQTT() {
         mqttClient.publish(doorStatusTopic.c_str(), "ONLINE", true);
         publishDoorState();
 
+        // Báo trạng thái ONLINE và State ban đầu của LED RGB
+        publishRgbStatus("ONLINE");
+        publishRgbState();
+
         publishAllTelemetries();
         publishNodeDiscovery();
     } else {
@@ -1512,6 +2039,7 @@ void publishAllTelemetries() {
     for (int i = 0; i < NUM_LEDS; i++) {
         publishDeviceTelemetry(i);
     }
+    publishRgbTelemetry();
     publishGateTelemetry();
     publishDoorTelemetry();
 }
@@ -1548,6 +2076,19 @@ void publishNodeDiscovery() {
         d["power"]      = leds[i].power;
         d["brightness"] = leds[i].brightness;
     }
+
+    JsonObject dRgb = devList.add<JsonObject>();
+    dRgb["deviceId"]   = DEVICE_ID_LED_RGB;
+    dRgb["name"]       = "Đèn LED RGB";
+    dRgb["type"]       = DEVICE_TYPE_LED_RGB;
+    dRgb["gpio_r"]     = PIN_RGB_RED;
+    dRgb["gpio_g"]     = PIN_RGB_GREEN;
+    dRgb["gpio_b"]     = PIN_RGB_BLUE;
+    dRgb["power"]      = rgbLed.power;
+    dRgb["brightness"] = rgbLed.brightness;
+    dRgb["r"]          = rgbLed.r;
+    dRgb["g"]          = rgbLed.g;
+    dRgb["b"]          = rgbLed.b;
 
     JsonObject dGate = devList.add<JsonObject>();
     dGate["deviceId"] = GATE_DEVICE_ID;
@@ -1967,6 +2508,83 @@ void processCommandPayload(const String& topicDeviceId, const char* payloadStr) 
         return;
     }
 
+    // 4b. Kiểm tra xem lệnh có phải dành cho ĐÈN LED RGB
+    bool isRgb = (deviceId.equalsIgnoreCase(DEVICE_ID_LED_RGB) || 
+                  deviceId.equalsIgnoreCase("rgb") || 
+                  deviceId.equalsIgnoreCase("led_rgb") || 
+                  deviceId.equalsIgnoreCase("den_rgb") ||
+                  action == "SET_RGB" || action == "SET_COLOR");
+
+    if (isRgb) {
+        // Parse RGB values from root or nested params/color
+        int rVal = -1, gVal = -1, bVal = -1;
+        String hexVal = "";
+
+        if (doc.containsKey("r")) rVal = doc["r"].as<int>();
+        if (doc.containsKey("g")) gVal = doc["g"].as<int>();
+        if (doc.containsKey("b")) bVal = doc["b"].as<int>();
+        if (doc.containsKey("hex")) hexVal = doc["hex"].as<String>();
+        else if (doc.containsKey("color") && doc["color"].is<String>()) hexVal = doc["color"].as<String>();
+
+        if (!params.isNull()) {
+            if (rVal < 0 && params.containsKey("r")) rVal = params["r"].as<int>();
+            if (gVal < 0 && params.containsKey("g")) gVal = params["g"].as<int>();
+            if (bVal < 0 && params.containsKey("b")) bVal = params["b"].as<int>();
+            if (hexVal.length() == 0 && params.containsKey("hex")) hexVal = params["hex"].as<String>();
+            else if (hexVal.length() == 0 && params.containsKey("color") && params["color"].is<String>()) hexVal = params["color"].as<String>();
+
+            if (params.containsKey("color") && params["color"].is<JsonObject>()) {
+                JsonObject cObj = params["color"].as<JsonObject>();
+                if (rVal < 0 && cObj.containsKey("r")) rVal = cObj["r"].as<int>();
+                if (gVal < 0 && cObj.containsKey("g")) gVal = cObj["g"].as<int>();
+                if (bVal < 0 && cObj.containsKey("b")) bVal = cObj["b"].as<int>();
+            }
+        }
+
+        if (action == "TURN_ON" || action == "POWER_ON" || action == "ON" || action == "BAT") {
+            setRgbPower(true, commandId);
+            if (hasBrightnessParam && brightnessValue > 0) {
+                setRgbBrightness(brightnessValue, commandId);
+            }
+            if (rVal >= 0 && gVal >= 0 && bVal >= 0) {
+                setRgbColor((uint8_t)constrain(rVal, 0, 255), (uint8_t)constrain(gVal, 0, 255), (uint8_t)constrain(bVal, 0, 255), commandId);
+            } else if (hexVal.length() >= 6) {
+                setRgbHex(hexVal, commandId);
+            }
+        } else if (action == "TURN_OFF" || action == "POWER_OFF" || action == "OFF" || action == "TAT") {
+            setRgbPower(false, commandId);
+        } else if (action == "TOGGLE") {
+            toggleRgbPower(commandId);
+        } else if (action == "SET_POWER") {
+            if (hasPowerParam) setRgbPower(powerValue, commandId);
+            else setRgbPower(true, commandId);
+            if (hasBrightnessParam && brightnessValue > 0) setRgbBrightness(brightnessValue, commandId);
+        } else if (action == "SET_BRIGHTNESS" || action == "BRIGHTNESS" || action == "DIM") {
+            if (hasBrightnessParam) setRgbBrightness(brightnessValue, commandId);
+        } else if (action == "INCREASE_BRIGHTNESS" || action == "BRI_UP" || action == "BRIGHTNESS_UP" || action == "TANG") {
+            stepRgbBrightness(stepAmount, commandId);
+        } else if (action == "DECREASE_BRIGHTNESS" || action == "BRI_DOWN" || action == "BRIGHTNESS_DOWN" || action == "GIAM") {
+            stepRgbBrightness(-stepAmount, commandId);
+        } else if (action == "SET_RGB" || action == "SET_COLOR" || action == "COLOR" || action == "RGB") {
+            if (hasBrightnessParam && brightnessValue > 0) {
+                setRgbBrightness(brightnessValue, commandId);
+            }
+            if (rVal >= 0 && gVal >= 0 && bVal >= 0) {
+                setRgbColor((uint8_t)constrain(rVal, 0, 255), (uint8_t)constrain(gVal, 0, 255), (uint8_t)constrain(bVal, 0, 255), commandId);
+            } else if (hexVal.length() >= 6) {
+                setRgbHex(hexVal, commandId);
+            } else {
+                setRgbPower(true, commandId);
+            }
+        } else if (action == "GET_STATE" || action == "STATUS") {
+            publishRgbState(commandId);
+            publishRgbTelemetry();
+        } else {
+            Serial.printf("[RGB] Action khong ro: %s\n", action.c_str());
+        }
+        return;
+    }
+
     // 5. Kiểm tra xem lệnh áp dụng cho TẤT CẢ các đèn hay 1 đèn cụ thể
     bool isAllLeds = (deviceId.equalsIgnoreCase("all") || deviceId.equalsIgnoreCase("all_leds") || deviceId.length() == 0);
 
@@ -2118,8 +2736,16 @@ void printHelp() {
     Serial.println("     - Cài chung Đóng/Mở  : 'door time 2000'");
     Serial.println("     - Cài số vòng quay   : 'door open_turns 5', 'door close_turns 4.8', 'door turns 5'");
     Serial.println("     - Cài tốc độ PWM     : 'door speed 120' (0 - 255)");
-    Serial.println("  7. Tiện ích hệ thống:");
-    Serial.println("     - 'status' / 'info'  : Xem bảng trạng thái 4 đèn, Cổng, Cửa cuốn/Rèm, Wi-Fi, MQTT");
+    Serial.println("  7. Điều khiển LED RGB (Chỉnh màu & độ sáng):");
+    Serial.println("     - Bật / Tắt          : 'rgb on' / 'rgb off'");
+    Serial.println("     - Đảo trạng thái     : 'rgb toggle'");
+    Serial.println("     - Chỉnh độ sáng      : 'rgb bri 80', 'rgb 80%'");
+    Serial.println("     - Tăng / Giảm độ sáng: 'rgb +', 'rgb -', 'rgb + 20', 'rgb - 20'");
+    Serial.println("     - Đổi màu cơ bản     : 'rgb red', 'green', 'blue', 'white', 'yellow', 'cyan', 'purple'");
+    Serial.println("     - Đổi màu mã RGB     : 'rgb 255 120 50' (0 - 255)");
+    Serial.println("     - Đổi màu mã Hex     : 'rgb #FF5733'");
+    Serial.println("  8. Tiện ích hệ thống:");
+    Serial.println("     - 'status' / 'info'  : Xem bảng trạng thái 4 đèn, LED RGB, Cổng, Cửa cuốn, Wi-Fi, MQTT");
     Serial.println("     - 'telemetry'        : Gửi ngay Telemetry lên MQTT (khi online)");
     Serial.println("     - 'scan'             : Quét lại mDNS tìm MQTT Broker");
     Serial.println("     - 'restart'          : Khởi động lại ESP32");
@@ -2154,6 +2780,15 @@ void printStatus() {
                       (int)round(leds[i].currentDuty),
                       leds[i].deviceId);
     }
+    Serial.println("------------------------------------------------------------------------------------------------------------------");
+    Serial.println("THIẾT BỊ LED RGB        | TRẠNG THÁI | ĐỘ SÁNG | MÀU SẮC (HEX)    | RGB (R, G, B)      | CHÂN (R, G, B) | DEVICE ID");
+    Serial.printf(" LED RGB                | %-10s | %3d%%    | %-16s | (%3d, %3d, %3d)    | (%d, %d, %d)   | %s\n",
+                  rgbLed.power ? "BẬT (ON)" : "TẮT (OFF)",
+                  rgbLed.brightness,
+                  rgbLed.hex.c_str(),
+                  rgbLed.r, rgbLed.g, rgbLed.b,
+                  PIN_RGB_RED, PIN_RGB_GREEN, PIN_RGB_BLUE,
+                  DEVICE_ID_LED_RGB);
     Serial.println("------------------------------------------------------------------------------------------------------------------");
     Serial.println("THIẾT BỊ MOTOR (L298N)  | TRẠNG THÁI | THỜI GIAN MỞ    | THỜI GIAN ĐÓNG  | VÒNG (MỞ/ĐÓNG) | PWM | DEVICE ID");
     Serial.printf(" Cổng trượt (Motor A)   | %-10s | %5ums (%.2fs) | %5ums (%.2fs) | %4.1f / %4.1f v  | %3d | %s\n",
@@ -2264,8 +2899,7 @@ void handleSerialCommands() {
         } else if (sub == "off" || sub == "0" || sub == "false" || sub == "disable") {
             enableSmoothFading = false;
             for (int i = 0; i < NUM_LEDS; i++) {
-                leds[i].currentDuty = leds[i].targetDuty;
-                writeHardwarePWM(i, (uint8_t)round(leds[i].currentDuty));
+                updateLedTargetDuty(i, true);
             }
             Serial.println("[CONFIG] Da TAT Smooth Fading (do sang thay doi tuc thi).");
         } else {
@@ -2292,6 +2926,96 @@ void handleSerialCommands() {
             }
         } else {
             Serial.printf("[CONFIG] Cuc MOSFET hien tai: %s\n", mosfetActiveHigh ? "ACTIVE-HIGH" : "ACTIVE-LOW");
+        }
+        return;
+    }
+
+    // 3.1 Điều khiển LED RGB (Chỉnh màu & Độ sáng)
+    if (lowerCmd.startsWith("rgb ") || lowerCmd == "rgb") {
+        String sub = lowerCmd.startsWith("rgb ") ? lowerCmd.substring(4) : "";
+        sub.trim();
+
+        if (sub.length() == 0 || sub == "toggle" || sub == "tog" || sub == "dao") {
+            toggleRgbPower();
+        } else if (sub == "on" || sub == "bat") {
+            setRgbPower(true);
+        } else if (sub == "off" || sub == "tat") {
+            setRgbPower(false);
+        } else if (sub == "+" || sub == "up" || sub == "tang") {
+            stepRgbBrightness(10);
+        } else if (sub.startsWith("+") || sub.startsWith("up ") || sub.startsWith("tang ") || sub.startsWith("+ ")) {
+            int val = 10;
+            if (sub.startsWith("+")) {
+                String numPart = sub.substring(1);
+                numPart.trim();
+                val = numPart.toInt();
+            } else {
+                val = sub.substring(sub.indexOf(' ') + 1).toInt();
+            }
+            if (val <= 0) val = 10;
+            stepRgbBrightness(val);
+        } else if (sub == "-" || sub == "down" || sub == "giam") {
+            stepRgbBrightness(-10);
+        } else if (sub.startsWith("-") || sub.startsWith("down ") || sub.startsWith("giam ") || sub.startsWith("- ")) {
+            int val = 10;
+            if (sub.startsWith("-")) {
+                String numPart = sub.substring(1);
+                numPart.trim();
+                val = numPart.toInt();
+            } else {
+                val = sub.substring(sub.indexOf(' ') + 1).toInt();
+            }
+            if (val <= 0) val = 10;
+            stepRgbBrightness(-val);
+        } else if (sub.startsWith("bri ") || sub.startsWith("b ")) {
+            int val = sub.substring(sub.indexOf(' ') + 1).toInt();
+            setRgbBrightness(val);
+        } else if (sub.endsWith("%")) {
+            int val = sub.substring(0, sub.length() - 1).toInt();
+            setRgbBrightness(val);
+        } else if (sub.startsWith("#")) {
+            setRgbHex(sub);
+        } else if (sub == "red" || sub == "do") {
+            setRgbColor(255, 0, 0);
+        } else if (sub == "green" || sub == "xanhla") {
+            setRgbColor(0, 255, 0);
+        } else if (sub == "blue" || sub == "xanhduong") {
+            setRgbColor(0, 0, 255);
+        } else if (sub == "white" || sub == "trang") {
+            setRgbColor(255, 255, 255);
+        } else if (sub == "yellow" || sub == "vang") {
+            setRgbColor(255, 255, 0);
+        } else if (sub == "cyan" || sub == "xanhlo") {
+            setRgbColor(0, 255, 255);
+        } else if (sub == "purple" || sub == "magenta" || sub == "tim") {
+            setRgbColor(255, 0, 255);
+        } else if (sub == "orange" || sub == "cam") {
+            setRgbColor(255, 128, 0);
+        } else {
+            // Check if 3 numbers "r g b" (e.g. "rgb 255 120 0")
+            int firstSpace = sub.indexOf(' ');
+            if (firstSpace > 0) {
+                int secondSpace = sub.indexOf(' ', firstSpace + 1);
+                if (secondSpace > 0) {
+                    int r = sub.substring(0, firstSpace).toInt();
+                    int g = sub.substring(firstSpace + 1, secondSpace).toInt();
+                    int b = sub.substring(secondSpace + 1).toInt();
+                    setRgbColor(constrain(r, 0, 255), constrain(g, 0, 255), constrain(b, 0, 255));
+                    return;
+                }
+            }
+            // Check if hex without # (e.g. "rgb FF00AA")
+            if (sub.length() == 6) {
+                setRgbHex("#" + sub);
+                return;
+            }
+            // Check if single integer (brightness)
+            int val = sub.toInt();
+            if (val > 0 || sub == "0") {
+                setRgbBrightness(val);
+            } else {
+                Serial.println("[ERROR] Lenh RGB khong hop le! Go 'help' de xem cu phap.");
+            }
         }
         return;
     }
@@ -2631,11 +3355,18 @@ void setup() {
     // 1. Khởi tạo phần cứng PWM và chân MOSFET đèn
     initPWM();
 
+    // 1.1 Khởi tạo phần cứng LED RGB
+    initRgbPWM();
+
     // 2. Khởi tạo phần cứng Cổng trượt & Cửa cuốn (Motor L298N theo thời gian / vòng quay)
     initMotorHardware();
 
+    // 2.1 Khởi tạo 4 nút nhấn nhả (Momentary Push Buttons)
+    initButtons();
+
     // 3. Khôi phục trạng thái từ Flash NVS
     loadAllStatesFromNVS();
+    loadRgbStateFromNVS();
     loadMotorConfigFromNVS();
     loadNetworkConfigFromNVS();
 
@@ -2668,6 +3399,9 @@ void setup() {
 }
 
 void loop() {
+    // 0. Quét trạng thái và chống rung 4 nút nhấn nhả
+    handleButtons();
+
     unsigned long now = millis();
 
     // 1. Cập nhật hiệu ứng Smooth Fading mềm mại cho các đèn

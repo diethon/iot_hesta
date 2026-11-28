@@ -104,7 +104,7 @@
 // Đặt true : BỎ QUA kết nối Wi-Fi, MQTT, BLE. Dành riêng để test cảm biến, 2 đèn, quạt, bơm, Servo qua Serial.
 //            Vòng lặp loop() chạy mượt mà tức thì, không bị đứng/lag bởi socket timeout 15s.
 // Đặt false: Chạy đầy đủ hệ thống thật (BLE Provisioning -> Wi-Fi -> mDNS -> MQTT Broker).
-#define OFFLINE_TEST_MODE true
+#define OFFLINE_TEST_MODE false
 bool offlineTestMode = OFFLINE_TEST_MODE;
 
 // --- 2.1 CẢM BIẾN MÔI TRƯỜNG & AN TOÀN PCCC ---
@@ -166,7 +166,7 @@ bool enableLivingLightFading    = true; // Bật hiệu ứng fade on / fade off
 #define PIN_FP_TOUCH              -1     // Chân WAK (touch) của AS608, -1 = không dùng (quét bằng polling)
 #define FP_TOUCH_ACTIVE_LEVEL     HIGH   // WAK = HIGH khi có ngón tay đặt lên
 #define FP_MIN_CONFIDENCE         50     // Độ tin cậy tối thiểu để chấp nhận mở cửa
-#define FP_SCAN_INTERVAL_MS       150    // Chu kỳ quét vân tay khi chờ mở khóa
+#define FP_SCAN_INTERVAL_MS       40     // Chu kỳ quét vân tay khi chờ mở khóa (40ms -> phản hồi tức thì)
 #define FP_DOOR_AUTO_CLOSE_MS     5000   // Tự đóng cửa sau khi mở bằng vân tay (0 = không tự đóng)
 #define FP_MAX_FAILED_ATTEMPTS    5      // Sai liên tiếp N lần -> khóa quét tạm thời
 #define FP_LOCKOUT_MS             30000  // Thời gian khóa quét sau khi sai quá nhiều
@@ -327,6 +327,17 @@ uint8_t fanSpeed = 1; // Cấp tốc độ quạt: 1 (Thấp), 2 (Trung bình), 
 // --- TRẠNG THÁI MÁY BƠM NƯỚC (WATER PUMP / MOTOR) ---
 bool pumpPower = false;
 
+// --- TRẠNG THÁI CẢM BIẾN VÂN TAY AS608 ---
+enum FpMode : uint8_t { FP_MODE_SCAN, FP_MODE_ENROLL };
+enum FpEnrollStep : uint8_t { FP_EN_WAIT_FINGER_1, FP_EN_WAIT_FINGER_2, FP_EN_WAIT_REMOVE };
+bool          fpReady              = false;
+bool          fpScanEnabled        = true;
+FpMode        fpMode               = FP_MODE_SCAN;
+FpEnrollStep  fpEnrollStep         = FP_EN_WAIT_FINGER_1;
+FpEnrollStep  fpEnrollAfterRemove  = FP_EN_WAIT_FINGER_1; // Bước tiếp theo sau khi nhấc tay ra
+uint16_t      fpEnrollId           = 0;
+String        fpEnrollmentId       = "";                  // ID phiên đăng ký từ App/Backend (nếu có)
+
 // ====================================================================================================
 // 6. NGUYÊN MẪU HÀM (FORWARD DECLARATIONS)
 // ====================================================================================================
@@ -426,12 +437,16 @@ void printHelp();
 void printStatus();
 
 // Cảm biến vân tay AS608
-enum FpMode : uint8_t { FP_MODE_SCAN, FP_MODE_ENROLL };
-enum FpEnrollStep : uint8_t { FP_EN_WAIT_FINGER_1, FP_EN_WAIT_FINGER_2, FP_EN_WAIT_REMOVE };
 bool initFingerprint();
 void updateFingerprint();
-void publishFingerprintEvent(const char* event, int fingerId, int confidence, const char* detail = nullptr);
-void fpEnrollGoRemove(FpEnrollStep next);
+void publishFingerprintEvent(const char* event, int fingerId, int confidence, const char* detail = nullptr, const char* step = nullptr, const char* enrollmentId = nullptr);
+void publishFingerprintListEvent();
+bool fpIdExists(uint16_t id);
+bool fpStartEnroll(int id, const char* enrollmentId = nullptr, String* errStep = nullptr, String* errDetail = nullptr);
+void fpEndEnroll(bool success, const char* reason, const char* step = nullptr);
+bool fpDeleteById(int id, String* errMsg = nullptr);
+void fpEnrollGoRemove(FpEnrollStep next, bool isRetry = false);
+void publishMainDoorCommandAck(const char* commandId, const String& replyNodeId, bool success, const char* errorCode = nullptr, const char* message = nullptr);
 void printFingerprintHelp();
 bool handleFingerprintCommand(const String& lowerCmd);
 
@@ -930,6 +945,31 @@ void publishMainDoorState(const char* commandId, const String& replyNodeId) {
             serializeJson(ackDoc2, ackBuf2, sizeof(ackBuf2));
             mqttClient.publish(altAckTopic.c_str(), ackBuf2, false);
         }
+    }
+}
+
+void publishMainDoorCommandAck(const char* commandId, const String& replyNodeId, bool success, const char* errorCode, const char* message) {
+    if (!mqttClient.connected() || !commandId || strlen(commandId) == 0) return;
+
+#if ARDUINOJSON_VERSION_MAJOR >= 7
+    JsonDocument ackDoc;
+#else
+    DynamicJsonDocument ackDoc(512);
+#endif
+    ackDoc["commandId"] = commandId;
+    ackDoc["deviceId"]  = MAIN_DOOR_DEVICE_ID;
+    ackDoc["status"]    = success ? "SUCCESS" : "FAILED";
+    if (errorCode && strlen(errorCode) > 0) ackDoc["errorCode"] = errorCode;
+    if (message && strlen(message) > 0)     ackDoc["message"]   = message;
+
+    char ackBuf[512];
+    serializeJson(ackDoc, ackBuf, sizeof(ackBuf));
+    mqttClient.publish(TOPIC_MAIN_DOOR_ACK.c_str(), ackBuf, false);
+    Serial.printf("[MQTT ACK -> MAIN DOOR FP]: %s\n", ackBuf);
+
+    if (replyNodeId.length() > 0 && replyNodeId != NODE_ID) {
+        String altAckTopic = "hesta/nodes/" + replyNodeId + "/devices/" MAIN_DOOR_DEVICE_ID "/ack";
+        mqttClient.publish(altAckTopic.c_str(), ackBuf, false);
     }
 }
 
@@ -1961,7 +2001,64 @@ void processCommandPayload(const String& topicDeviceId, const char* payloadStr, 
             setServoSpeed((uint16_t)cmdSpeed);
         }
 
-        if (action == "OPEN" || action == "DOOR_OPEN" || action == "MAIN_DOOR_OPEN" || action == "UNLOCK" || action == "MO" || action == "MO_CUA") {
+        if (action == "FP_ENROLL") {
+            int fpId = 0;
+            if (doc.containsKey("fingerprintId")) fpId = doc["fingerprintId"].as<int>();
+            else if (!params.isNull() && params.containsKey("fingerprintId")) fpId = params["fingerprintId"].as<int>();
+
+            String enrollIdStr = "";
+            if (doc.containsKey("enrollmentId") && !doc["enrollmentId"].isNull()) enrollIdStr = doc["enrollmentId"].as<String>();
+            else if (!params.isNull() && params.containsKey("enrollmentId") && !params["enrollmentId"].isNull()) enrollIdStr = params["enrollmentId"].as<String>();
+
+            if (fpMode == FP_MODE_ENROLL) {
+                publishFingerprintEvent("ENROLL_FAILED", fpId, -1, "Cam bien dang dang ky van tay khac", "BUSY", enrollIdStr.c_str());
+                publishMainDoorCommandAck(commandId, sourceNodeId, false, "BUSY", "Cam bien dang dang ky van tay khac");
+            } else {
+                String errStep = "";
+                String errDetail = "";
+                if (fpStartEnroll(fpId, enrollIdStr.c_str(), &errStep, &errDetail)) {
+                    publishMainDoorCommandAck(commandId, sourceNodeId, true);
+                } else {
+                    publishFingerprintEvent("ENROLL_FAILED", fpId, -1, errDetail.c_str(), errStep.c_str(), enrollIdStr.c_str());
+                    publishMainDoorCommandAck(commandId, sourceNodeId, false, errStep.c_str(), errDetail.c_str());
+                }
+            }
+            return;
+        } else if (action == "FP_CANCEL") {
+            String enrollIdStr = "";
+            if (doc.containsKey("enrollmentId") && !doc["enrollmentId"].isNull()) enrollIdStr = doc["enrollmentId"].as<String>();
+            else if (!params.isNull() && params.containsKey("enrollmentId") && !params["enrollmentId"].isNull()) enrollIdStr = params["enrollmentId"].as<String>();
+
+            if (fpMode == FP_MODE_ENROLL && (enrollIdStr.length() == 0 || fpEnrollmentId.length() == 0 || fpEnrollmentId == enrollIdStr)) {
+                fpEndEnroll(false, "Nguoi dung huy", "CANCELLED");
+            }
+            publishMainDoorCommandAck(commandId, sourceNodeId, true);
+            return;
+        } else if (action == "FP_DELETE") {
+            int fpId = 0;
+            if (doc.containsKey("fingerprintId")) fpId = doc["fingerprintId"].as<int>();
+            else if (!params.isNull() && params.containsKey("fingerprintId")) fpId = params["fingerprintId"].as<int>();
+
+            if (!fpReady) {
+                publishMainDoorCommandAck(commandId, sourceNodeId, false, "SENSOR_NOT_READY", "Cam bien van tay chua san sang");
+            } else {
+                String errMsg = "";
+                if (fpDeleteById(fpId, &errMsg)) {
+                    publishMainDoorCommandAck(commandId, sourceNodeId, true);
+                } else {
+                    publishMainDoorCommandAck(commandId, sourceNodeId, false, "DELETE_FAILED", errMsg.c_str());
+                }
+            }
+            return;
+        } else if (action == "FP_LIST") {
+            if (!fpReady) {
+                publishMainDoorCommandAck(commandId, sourceNodeId, false, "SENSOR_NOT_READY", "Cam bien van tay chua san sang");
+            } else {
+                publishFingerprintListEvent();
+                publishMainDoorCommandAck(commandId, sourceNodeId, true);
+            }
+            return;
+        } else if (action == "OPEN" || action == "DOOR_OPEN" || action == "MAIN_DOOR_OPEN" || action == "UNLOCK" || action == "MO" || action == "MO_CUA") {
             mainDoorOpen(commandId, sourceNodeId);
         } else if (action == "CLOSE" || action == "DOOR_CLOSE" || action == "MAIN_DOOR_CLOSE" || action == "LOCK" || action == "DONG" || action == "DONG_CUA") {
             mainDoorClose(commandId, sourceNodeId);
@@ -2692,14 +2789,8 @@ void initHardwarePins() {
 // - Sự kiện được publish lên topic .../devices/<MAIN_DOOR>/event khi đang online (chuẩn bị cho Backend/App).
 HardwareSerial& fpSerial = Serial1;
 Adafruit_Fingerprint finger(&Serial1);
-// (enum FpMode / FpEnrollStep được khai báo ở mục 6 - Forward Declarations)
+// (enum FpMode / FpEnrollStep và fpReady / fpMode / fpEnrollmentId đã khai báo ở mục 5)
 
-bool          fpReady              = false;
-bool          fpScanEnabled        = true;
-FpMode        fpMode               = FP_MODE_SCAN;
-FpEnrollStep  fpEnrollStep         = FP_EN_WAIT_FINGER_1;
-FpEnrollStep  fpEnrollAfterRemove  = FP_EN_WAIT_FINGER_1; // Bước tiếp theo sau khi nhấc tay ra
-uint16_t      fpEnrollId           = 0;
 uint16_t      fpCapacity           = 162;                 // AS608 thường 162 mẫu (đọc lại từ module)
 uint32_t      fpBaud               = 57600;
 unsigned long fpStepStartedAt      = 0;
@@ -2738,7 +2829,7 @@ bool fpIsCommError(uint8_t code) {
     return code == FINGERPRINT_PACKETRECIEVEERR || code == FINGERPRINT_TIMEOUT || code == FINGERPRINT_BADPACKET;
 }
 
-void publishFingerprintEvent(const char* event, int fingerId, int confidence, const char* detail) {
+void publishFingerprintEvent(const char* event, int fingerId, int confidence, const char* detail, const char* step, const char* enrollmentId) {
     if (offlineTestMode || !mqttClient.connected()) return;
 
 #if ARDUINOJSON_VERSION_MAJOR >= 7
@@ -2753,13 +2844,42 @@ void publishFingerprintEvent(const char* event, int fingerId, int confidence, co
     doc["event"]      = event;
     if (fingerId >= 0) doc["fingerprintId"] = fingerId;
     if (confidence >= 0) doc["confidence"] = confidence;
-    if (detail) doc["detail"] = detail;
+    if (detail && strlen(detail) > 0) doc["detail"] = detail;
+    if (step && strlen(step) > 0) doc["step"] = step;
+    if (enrollmentId && strlen(enrollmentId) > 0) doc["enrollmentId"] = enrollmentId;
     doc["doorState"]  = mainDoorOpenState ? "OPEN" : "CLOSED";
     doc["uptime"]     = millis() / 1000;
 
     char buf[512];
     serializeJson(doc, buf, sizeof(buf));
     mqttClient.publish(TOPIC_MAIN_DOOR_EVENT.c_str(), buf, false);
+}
+
+void publishFingerprintListEvent() {
+    if (!fpReady || offlineTestMode || !mqttClient.connected()) return;
+
+#if ARDUINOJSON_VERSION_MAJOR >= 7
+    JsonDocument doc;
+#else
+    DynamicJsonDocument doc(2048);
+#endif
+    doc["nodeId"]     = NODE_ID;
+    doc["deviceId"]   = MAIN_DOOR_DEVICE_ID;
+    doc["deviceType"] = DEVICE_TYPE_DOOR;
+    doc["source"]     = "FINGERPRINT";
+    doc["event"]      = "LIST";
+    JsonArray ids = doc["ids"].to<JsonArray>();
+    for (uint16_t id = 1; id < fpCapacity; id++) {
+        if (fpIdExists(id)) {
+            ids.add(id);
+        }
+    }
+    doc["uptime"] = millis() / 1000;
+
+    char buf[2048];
+    serializeJson(doc, buf, sizeof(buf));
+    mqttClient.publish(TOPIC_MAIN_DOOR_EVENT.c_str(), buf, false);
+    Serial.printf("[FINGERPRINT] Da gui danh sach %u van tay len Backend.\n", (unsigned int)ids.size());
 }
 
 bool initFingerprint() {
@@ -2845,53 +2965,91 @@ void fpListTemplates() {
     Serial.println(printed == 0 ? " (trong)" : "");
 }
 
-void fpEndEnroll(bool success, const char* reason) {
+bool fpDeleteById(int id, String* errMsg) {
+    if (id <= 0 || id >= fpCapacity) {
+        if (errMsg) *errMsg = "ID khong hop le (1 - " + String(fpCapacity - 1) + ")";
+        return false;
+    }
+    uint8_t p = finger.deleteModel(id);
+    if (p == FINGERPRINT_OK) {
+        Serial.printf("[FINGERPRINT] Da XOA van tay ID #%d.\n", id);
+        publishFingerprintEvent("DELETED", id, -1);
+        return true;
+    }
+    if (errMsg) *errMsg = fpCodeText(p);
+    Serial.printf("[FINGERPRINT] Xoa ID #%d that bai: %s\n", id, fpCodeText(p));
+    return false;
+}
+
+void fpEndEnroll(bool success, const char* reason, const char* step) {
+    const char* enrollPtr = fpEnrollmentId.length() > 0 ? fpEnrollmentId.c_str() : nullptr;
     if (success) {
         Serial.printf("[FINGERPRINT] >>> DANG KY THANH CONG VAN TAY ID #%u <<<\n", fpEnrollId);
-        publishFingerprintEvent("ENROLL_SUCCESS", fpEnrollId, -1);
+        publishFingerprintEvent("ENROLL_SUCCESS", fpEnrollId, -1, nullptr, step ? step : "DONE", enrollPtr);
     } else {
         Serial.printf("[FINGERPRINT] !!! DANG KY ID #%u THAT BAI: %s !!!\n", fpEnrollId, reason ? reason : "");
-        publishFingerprintEvent("ENROLL_FAILED", fpEnrollId, -1, reason);
+        publishFingerprintEvent("ENROLL_FAILED", fpEnrollId, -1, reason, step, enrollPtr);
     }
+    fpEnrollmentId = "";
     fpMode = FP_MODE_SCAN;
     fpWaitRelease = true; // Tránh ngón tay vẫn đặt trên cảm biến bị quét mở cửa ngay
 }
 
-bool fpStartEnroll(int id) {
-    if (!fpReady) { Serial.println("[FINGERPRINT] Cam bien chua san sang. Go 'fp init'."); return false; }
+bool fpStartEnroll(int id, const char* enrollmentId, String* errStep, String* errDetail) {
+    if (!fpReady) {
+        Serial.println("[FINGERPRINT] Cam bien chua san sang. Go 'fp init'.");
+        if (errStep) *errStep = "SENSOR_NOT_READY";
+        if (errDetail) *errDetail = "Cam bien van tay chua san sang";
+        return false;
+    }
     if (id <= 0) {
         id = fpFindFreeId();
-        if (id < 0) { Serial.println("[FINGERPRINT] Bo nho cam bien da day!"); return false; }
+        if (id < 0) {
+            Serial.println("[FINGERPRINT] Bo nho cam bien da day!");
+            if (errStep) *errStep = "MEMORY_FULL";
+            if (errDetail) *errDetail = "Bo nho cam bien da day";
+            return false;
+        }
     }
     if (id >= fpCapacity) {
         Serial.printf("[FINGERPRINT] ID khong hop le. Chon ID tu 1 den %u.\n", fpCapacity - 1);
+        if (errStep) *errStep = "INVALID_SLOT";
+        if (errDetail) *errDetail = "ID vuot qua dung luong cam bien";
         return false;
     }
     if (fpIdExists(id)) {
         Serial.printf("[FINGERPRINT] ID #%d da co van tay. Xoa truoc bang 'fp delete %d' hoac chon ID khac.\n", id, id);
+        if (errStep) *errStep = "SLOT_OCCUPIED";
+        if (errDetail) *errDetail = "Vi tri #" + String(id) + " da co van tay trong cam bien";
         return false;
     }
 
     fpEnrollId = id;
+    fpEnrollmentId = (enrollmentId && strlen(enrollmentId) > 0) ? String(enrollmentId) : "";
     fpMode = FP_MODE_ENROLL;
     fpEnrollStep = FP_EN_WAIT_FINGER_1;
     fpStepStartedAt = millis();
     Serial.printf("\n[FINGERPRINT] === DANG KY VAN TAY ID #%u ===\n", fpEnrollId);
     Serial.println("[FINGERPRINT] (1/2) Dat ngon tay len cam bien... (go 'fp cancel' de huy)");
+    publishFingerprintEvent("ENROLL_PROGRESS", fpEnrollId, -1, nullptr, "PLACE_FINGER_1",
+                            fpEnrollmentId.length() > 0 ? fpEnrollmentId.c_str() : nullptr);
     return true;
 }
 
-void fpEnrollGoRemove(FpEnrollStep next) {
+void fpEnrollGoRemove(FpEnrollStep next, bool isRetry) {
     fpEnrollStep = FP_EN_WAIT_REMOVE;
     fpEnrollAfterRemove = next;
     fpStepStartedAt = millis();
     Serial.println("[FINGERPRINT] Nhac ngon tay ra khoi cam bien...");
+    publishFingerprintEvent("ENROLL_PROGRESS", fpEnrollId, -1, nullptr,
+                            isRetry ? "RETRY_REMOVE_FINGER" : "REMOVE_FINGER",
+                            fpEnrollmentId.length() > 0 ? fpEnrollmentId.c_str() : nullptr);
 }
 
 void fpProcessEnroll() {
     unsigned long now = millis();
     if (now - fpStepStartedAt > FP_ENROLL_STEP_TIMEOUT_MS) {
-        fpEndEnroll(false, "Het thoi gian cho (timeout)");
+        fpEndEnroll(false, "Het thoi gian cho (timeout)", "TIMEOUT");
         return;
     }
 
@@ -2906,8 +3064,12 @@ void fpProcessEnroll() {
                 fpStepStartedAt = now;
                 if (fpEnrollStep == FP_EN_WAIT_FINGER_2) {
                     Serial.println("[FINGERPRINT] (2/2) Dat LAI CUNG ngon tay do len cam bien...");
+                    publishFingerprintEvent("ENROLL_PROGRESS", fpEnrollId, -1, nullptr, "PLACE_FINGER_2",
+                                            fpEnrollmentId.length() > 0 ? fpEnrollmentId.c_str() : nullptr);
                 } else {
                     Serial.println("[FINGERPRINT] (1/2) Dat ngon tay len cam bien...");
+                    publishFingerprintEvent("ENROLL_PROGRESS", fpEnrollId, -1, nullptr, "PLACE_FINGER_1",
+                                            fpEnrollmentId.length() > 0 ? fpEnrollmentId.c_str() : nullptr);
                 }
             }
             break;
@@ -2917,18 +3079,19 @@ void fpProcessEnroll() {
             p = finger.image2Tz(1);
             if (p != FINGERPRINT_OK) {
                 Serial.printf("[FINGERPRINT] Anh chua ro (%s). Thu lai.\n", fpCodeText(p));
-                fpEnrollGoRemove(FP_EN_WAIT_FINGER_1);
+                fpEnrollGoRemove(FP_EN_WAIT_FINGER_1, true);
                 return;
             }
             // Kiểm tra trùng: vân tay này đã đăng ký ở ID khác chưa?
             if (finger.fingerFastSearch() == FINGERPRINT_OK) {
                 Serial.printf("[FINGERPRINT] Van tay nay DA DUOC DANG KY voi ID #%u (do tin cay %u).\n",
                               finger.fingerID, finger.confidence);
-                fpEndEnroll(false, "Van tay da ton tai");
+                String dupDetail = "Van tay da ton tai (#" + String(finger.fingerID) + ")";
+                fpEndEnroll(false, dupDetail.c_str(), "DUPLICATE");
                 return;
             }
             Serial.println("[FINGERPRINT] Lan 1 OK.");
-            fpEnrollGoRemove(FP_EN_WAIT_FINGER_2);
+            fpEnrollGoRemove(FP_EN_WAIT_FINGER_2, false);
             break;
 
         case FP_EN_WAIT_FINGER_2:
@@ -2936,28 +3099,34 @@ void fpProcessEnroll() {
             p = finger.image2Tz(2);
             if (p != FINGERPRINT_OK) {
                 Serial.printf("[FINGERPRINT] Anh chua ro (%s). Thu lai lan 2.\n", fpCodeText(p));
-                fpEnrollGoRemove(FP_EN_WAIT_FINGER_2);
+                fpEnrollGoRemove(FP_EN_WAIT_FINGER_2, true);
                 return;
             }
             p = finger.createModel();
             if (p != FINGERPRINT_OK) {
                 Serial.printf("[FINGERPRINT] Tao mau that bai (%s). Lam lai tu dau.\n", fpCodeText(p));
-                fpEnrollGoRemove(FP_EN_WAIT_FINGER_1);
+                fpEnrollGoRemove(FP_EN_WAIT_FINGER_1, true);
                 return;
             }
             p = finger.storeModel(fpEnrollId);
             if (p != FINGERPRINT_OK) {
-                fpEndEnroll(false, fpCodeText(p));
+                fpEndEnroll(false, fpCodeText(p), "STORE_FAILED");
                 return;
             }
-            fpEndEnroll(true, nullptr);
+            fpEndEnroll(true, nullptr, "DONE");
             break;
     }
 }
 
 void fpHandleMatch(uint16_t id, uint16_t confidence) {
     fpFailedAttempts = 0;
-    Serial.printf("\n[FINGERPRINT] >>> VAN TAY HOP LE: ID #%u (Do tin cay: %u) -> MO KHOA CUA CHINH <<<\n", id, confidence);
+    // Đẩy Servo mở cửa NGAY LẬP TỨC trước khi ghi NVS / gửi MQTT / in log
+    mainDoorOpenState = true;
+    targetServoAngle = SERVO_DOOR_ANGLE_OPEN;
+    currentServoAngle = SERVO_DOOR_ANGLE_OPEN;
+    applyServoPwm(currentServoAngle);
+
+    Serial.printf("\n[FINGERPRINT] >>> VAN TAY HOP LE: ID #%u (Do tin cay: %u) -> MO KHOA CUA CHINH TUC THI <<<\n", id, confidence);
     mainDoorOpen();
     if (fpAutoCloseMs > 0) {
         fpAutoClosePending = true;
@@ -3001,15 +3170,15 @@ void fpProcessScan() {
     if (fpIsCommError(p)) { fpCommErrors++; return; }
     fpCommErrors = 0;
     if (fpWaitRelease) return;      // Ngón tay cũ vẫn chưa nhấc ra
-    if (p != FINGERPRINT_OK) return; // Ảnh lỗi -> thử lại chu kỳ sau
+    if (p != FINGERPRINT_OK) return; // Ảnh lỗi -> thử lại ngay chu kỳ sau (không khóa fpWaitRelease)
 
-    fpWaitRelease = true;
     p = finger.image2Tz(1);
     if (p != FINGERPRINT_OK) {
-        Serial.printf("[FINGERPRINT] Anh van tay chua ro (%s). Nhac tay ra va dat lai.\n", fpCodeText(p));
+        // Ngón tay vừa chạm nên ảnh chưa rõ -> KHÔNG khóa fpWaitRelease để tự quét lại ngay sau 40ms
         return;
     }
 
+    fpWaitRelease = true; // Chỉ chờ nhấc tay sau khi đã có mẫu vân tay rõ để so khớp
     p = finger.fingerFastSearch();
     if (p == FINGERPRINT_OK && finger.confidence >= FP_MIN_CONFIDENCE) {
         fpHandleMatch(finger.fingerID, finger.confidence);
@@ -3120,7 +3289,7 @@ bool handleFingerprintCommand(const String& lowerCmd) {
     }
 
     if (sub == "cancel" || sub == "huy") {
-        if (fpMode == FP_MODE_ENROLL) fpEndEnroll(false, "Nguoi dung huy");
+        if (fpMode == FP_MODE_ENROLL) fpEndEnroll(false, "Nguoi dung huy", "CANCELLED");
         else Serial.println("[FINGERPRINT] Khong co qua trinh dang ky nao dang chay.");
         return true;
     }
@@ -3135,16 +3304,9 @@ bool handleFingerprintCommand(const String& lowerCmd) {
 
     if (sub.startsWith("delete ") || sub.startsWith("del ") || sub.startsWith("xoa ")) {
         int id = sub.substring(sub.indexOf(' ') + 1).toInt();
-        if (id <= 0 || id >= fpCapacity) {
-            Serial.printf("[FINGERPRINT] ID khong hop le (1 - %u).\n", fpCapacity - 1);
-            return true;
-        }
-        uint8_t p = finger.deleteModel(id);
-        if (p == FINGERPRINT_OK) {
-            Serial.printf("[FINGERPRINT] Da XOA van tay ID #%d.\n", id);
-            publishFingerprintEvent("DELETED", id, -1);
-        } else {
-            Serial.printf("[FINGERPRINT] Xoa ID #%d that bai: %s\n", id, fpCodeText(p));
+        String errMsg = "";
+        if (!fpDeleteById(id, &errMsg) && errMsg.length() > 0) {
+            Serial.printf("[FINGERPRINT] %s\n", errMsg.c_str());
         }
         return true;
     }
